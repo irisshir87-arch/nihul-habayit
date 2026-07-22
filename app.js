@@ -570,7 +570,7 @@ function render() {
 
 
 function addLabel(screen) {
-  return ({ shopping: "מוצר", events: "אירוע", tasks: "סידור", wishes: "תכנון", trip: "פריט ציוד" })[screen] || "פריט";
+  return ({ shopping: "מוצר", events: "אירוע", tasks: "סידור", wishes: "תכנון", trip: "פריט" })[screen] || "פריט";
 }
 
 function upcomingEvents() {
@@ -672,7 +672,7 @@ function renderHome() {
       ${calendarHtml(year, month)}
     </section>
     <section class="card home-shopping-card">
-      <div class="card-title-row home-shopping-title-row"><div><h3 class="card-title">קניות לפי קטגוריה</h3><span class="muted small">${activeShopping.length} פריטים פעילים</span></div><div class="home-shopping-actions"><button type="button" class="secondary-button compact-button" data-add-shopping-item>＋ הוספת פריט</button><button class="link-button" data-nav="shopping">לרשימת הקניות</button></div></div>
+      <div class="card-title-row home-shopping-title-row"><div><h3 class="card-title">קניות</h3><span class="muted small">${activeShopping.length} פריטים פעילים</span></div><div class="home-shopping-actions"><button type="button" class="secondary-button compact-button" data-add-shopping-item>＋ הוספת פריט</button><button class="link-button" data-nav="shopping">לרשימת הקניות</button></div></div>
       <div class="home-shopping-categories">${shoppingCounts.map(([category, count]) => homeShoppingCategoryHtml(category, count)).join("") || emptyHtml("רשימת הקניות ריקה")}</div>
     </section>`;
 }
@@ -758,6 +758,8 @@ function openCalendarDay(key) {
 function renderShopping() {
   const allActive = state.shopping.filter((item) => !item.purchased);
   const allPurchased = state.shopping.filter((item) => item.purchased);
+  const shoppingTotal = allActive.length + allPurchased.length;
+  const shoppingProgress = shoppingTotal ? Math.round((allPurchased.length / shoppingTotal) * 100) : 0;
   if (shoppingCategoryFilter !== "הכל" && !allActive.some((item) => (item.category || "אחר") === shoppingCategoryFilter)) {
     shoppingCategoryFilter = "הכל";
   }
@@ -769,6 +771,11 @@ function renderShopping() {
     : allPurchased.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
 
   return `<section class="shopping-page option-two-shopping-page">
+    <section class="shopping-basket-progress" aria-label="התקדמות מילוי הסל">
+      <div class="shopping-progress-heading"><div><strong>מילוי הסל</strong><span>${allPurchased.length} מתוך ${shoppingTotal} פריטים בסל</span></div><strong class="progress-number">${shoppingProgress}%</strong></div>
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${shoppingProgress}"><span style="width:${shoppingProgress}%"></span></div>
+    </section>
+
     <div class="shopping-filter-strip" role="tablist" aria-label="סינון לפי קטגוריה">
       ${shoppingFilterChipsHtml(allActive)}
     </div>
@@ -974,7 +981,7 @@ function renderEvents() {
     return `<section class="events-month-group">
       <div class="events-month-heading"><h3>${escapeHtml(monthTitle)}</h3><span>${monthEvents.length} אירועים</span></div>
       <section class="card events-card clean-list-card">
-        <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span></span></div>
+        <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span></span></div>
         <div class="compact-event-list">${monthEvents.map(eventFullHtml).join("")}</div>
       </section>
     </section>`;
@@ -983,13 +990,36 @@ function renderEvents() {
 
 function eventFullHtml(event) {
   const date = new Date(`${event.date}T12:00:00`);
-  const when = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
-  return `<div class="compact-event-row">
+  return `<div class="compact-event-row event-summary-row" data-view-event="${event.id}" role="button" tabindex="0" aria-label="פתיחת פרטי האירוע ${escapeHtml(event.title)}">
     <div class="compact-event-date"><strong>${date.getDate()}</strong><span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(date)}</span></div>
-    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}</div>${event.notes ? `<div class="list-meta one-line">${escapeHtml(event.notes)}</div>` : ""}</div>
-    <div class="event-when-cell"><strong>${when}</strong>${event.location ? `<span>${escapeHtml(event.location)}</span>` : ""}</div>
+    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}</div></div>
     ${moreMenuHtml(`<button type="button" data-edit-event="${event.id}">עריכה</button><button type="button" data-download-ics="${event.id}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${event.id}">מחיקה</button>`)}
   </div>`;
+}
+
+function openEventDetails(id) {
+  const event = state.events.find((existing) => existing.id === id);
+  if (!event) return;
+  const date = new Date(`${event.date}T12:00:00`);
+  const dateLabel = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(date);
+  const timeLabel = event.allDay
+    ? "כל היום"
+    : [event.startTime || "", event.endTime || ""].filter(Boolean).join("–") || "לא הוגדרה שעה";
+  const recurrenceLabels = { none: "ללא חזרה", weekly: "שבועי", monthly: "חודשי", yearly: "שנתי" };
+
+  dialogEyebrow.textContent = "פרטי אירוע";
+  dialogTitle.textContent = event.title;
+  dialogSubmit.hidden = true;
+  dialogForm.onsubmit = null;
+  dialogBody.innerHTML = `<div class="event-details-list">
+    <div class="event-detail-row"><span>תאריך</span><strong>${escapeHtml(dateLabel)}</strong></div>
+    <div class="event-detail-row"><span>שעה</span><strong>${escapeHtml(timeLabel)}</strong></div>
+    ${event.location ? `<div class="event-detail-row"><span>מקום</span><strong>${escapeHtml(event.location)}</strong></div>` : ""}
+    ${event.notes ? `<div class="event-detail-notes"><span>הערות</span><p>${escapeHtml(event.notes)}</p></div>` : ""}
+    ${event.recurring && event.recurring !== "none" ? `<div class="event-detail-row"><span>חזרתיות</span><strong>${escapeHtml(recurrenceLabels[event.recurring] || event.recurring)}</strong></div>` : ""}
+  </div>`;
+  if (dialog.open) dialog.close();
+  dialog.showModal();
 }
 
 /* Tasks */
@@ -1290,9 +1320,21 @@ function attachScreenEvents() {
     render();
   }));
 
-  document.querySelectorAll("[data-edit-event]").forEach((button) => button.addEventListener("click", () => openEditDialog("events", button.dataset.editEvent)));
-  document.querySelectorAll("[data-delete-event]").forEach((button) => button.addEventListener("click", () => deleteFrom("events", button.dataset.deleteEvent)));
-  document.querySelectorAll("[data-download-ics]").forEach((button) => button.addEventListener("click", () => downloadICS(button.dataset.downloadIcs)));
+  document.querySelectorAll("[data-view-event]").forEach((row) => {
+    row.addEventListener("click", (event) => {
+      if (event.target.closest(".more-menu")) return;
+      openEventDetails(row.dataset.viewEvent);
+    });
+    row.addEventListener("keydown", (event) => {
+      if ((event.key === "Enter" || event.key === " ") && !event.target.closest(".more-menu")) {
+        event.preventDefault();
+        openEventDetails(row.dataset.viewEvent);
+      }
+    });
+  });
+  document.querySelectorAll("[data-edit-event]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); openEditDialog("events", button.dataset.editEvent); }));
+  document.querySelectorAll("[data-delete-event]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); deleteFrom("events", button.dataset.deleteEvent); }));
+  document.querySelectorAll("[data-download-ics]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); downloadICS(button.dataset.downloadIcs); }));
 
   document.querySelectorAll("[data-task-toggle]").forEach((button) => button.addEventListener("click", () => toggleTask(button.dataset.taskToggle)));
   document.querySelectorAll("[data-task-expand]").forEach((button) => button.addEventListener("click", () => toggleTaskDescription(button.dataset.taskExpand)));
