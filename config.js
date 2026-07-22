@@ -5,6 +5,6 @@
 window.APP_CONFIG = {
   supabaseUrl: "https://jhubpggzkmvicvcrrwus.supabase.co",
   supabasePublishableKey: "sb_publishable_4vDdkl0ly8KBnTEdCvaYjw_7uX8B0nv",
-  sharedLoginEmail: "irisshir87@gmail.com",
+  sharedLoginEmail: "irisshir87+home@gmail.com",
   householdId: "6f0b65b4-4039-4e4b-9620-354ae31dc778",
 };
