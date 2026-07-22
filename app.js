@@ -974,7 +974,7 @@ function renderEvents() {
     return `<section class="events-month-group">
       <div class="events-month-heading"><h3>${escapeHtml(monthTitle)}</h3><span>${monthEvents.length} אירועים</span></div>
       <section class="card events-card clean-list-card">
-        <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span>משתתפים</span><span></span></div>
+        <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span></span></div>
         <div class="compact-event-list">${monthEvents.map(eventFullHtml).join("")}</div>
       </section>
     </section>`;
@@ -983,14 +983,12 @@ function renderEvents() {
 
 function eventFullHtml(event) {
   const date = new Date(`${event.date}T12:00:00`);
-  const participants = Array.isArray(event.participants) ? event.participants : [];
   const when = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
   return `<div class="compact-event-row">
     <div class="compact-event-date"><strong>${date.getDate()}</strong><span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(date)}</span></div>
     <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}</div>${event.notes ? `<div class="list-meta one-line">${escapeHtml(event.notes)}</div>` : ""}</div>
     <div class="event-when-cell"><strong>${when}</strong>${event.location ? `<span>${escapeHtml(event.location)}</span>` : ""}</div>
-    <div class="participant-badges">${participants.map((name) => `<span class="badge blue">${escapeHtml(name)}</span>`).join("") || `<span class="muted small">ללא משתתפים</span>`}</div>
-    ${moreMenuHtml(`<button type="button" data-edit-event="${event.id}">עריכה</button><button type="button" data-download-ics="${event.id}">הורדת זימון</button><button type="button" data-email-event="${event.id}">פתיחת מייל</button><button type="button" class="danger-menu-item" data-delete-event="${event.id}">מחיקה</button>`)}
+    ${moreMenuHtml(`<button type="button" data-edit-event="${event.id}">עריכה</button><button type="button" data-download-ics="${event.id}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${event.id}">מחיקה</button>`)}
   </div>`;
 }
 
@@ -1195,10 +1193,10 @@ function tripItemHtml(item) {
     <button class="checkbox ${item.packed ? "checked" : ""}" data-trip-toggle="${item.id}" aria-label="${item.packed ? "סימון כלא ארוז" : "סימון כארוז"}">${item.packed ? "✓" : ""}</button>
     <div class="list-main"><div class="list-title ${item.packed ? "strike" : ""}">${escapeHtml(item.name)}</div></div>
     <div class="quantity-stepper always-visible"><button class="stepper-button" data-trip-quantity="${item.id}" data-delta="-1">−</button><strong>${positiveInteger(item.quantity)}</strong><button class="stepper-button" data-trip-quantity="${item.id}" data-delta="1">＋</button></div>
-    <div class="trip-row-actions">
-      <button type="button" class="trip-action-button" data-edit-trip="${item.id}" aria-label="עריכת ${escapeHtml(item.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/><path d="m14.5 7.5 3 3"/></svg></button>
-      <button type="button" class="trip-action-button danger" data-delete-trip="${item.id}" aria-label="מחיקת ${escapeHtml(item.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>
-    </div>
+    ${moreMenuHtml(`
+      <button type="button" data-edit-trip="${item.id}">עריכה</button>
+      <button type="button" class="danger-menu-item" data-delete-trip="${item.id}">מחיקה</button>
+    `)}
   </div>`;
 }
 
@@ -1295,7 +1293,6 @@ function attachScreenEvents() {
   document.querySelectorAll("[data-edit-event]").forEach((button) => button.addEventListener("click", () => openEditDialog("events", button.dataset.editEvent)));
   document.querySelectorAll("[data-delete-event]").forEach((button) => button.addEventListener("click", () => deleteFrom("events", button.dataset.deleteEvent)));
   document.querySelectorAll("[data-download-ics]").forEach((button) => button.addEventListener("click", () => downloadICS(button.dataset.downloadIcs)));
-  document.querySelectorAll("[data-email-event]").forEach((button) => button.addEventListener("click", () => emailEvent(button.dataset.emailEvent)));
 
   document.querySelectorAll("[data-task-toggle]").forEach((button) => button.addEventListener("click", () => toggleTask(button.dataset.taskToggle)));
   document.querySelectorAll("[data-task-expand]").forEach((button) => button.addEventListener("click", () => toggleTaskDescription(button.dataset.taskExpand)));
@@ -1702,10 +1699,6 @@ function submitShoppingEdit(id, formData) {
   render();
 }
 
-function memberChoicesHtml(selected = HOUSEHOLD_MEMBERS) {
-  return HOUSEHOLD_MEMBERS.map((name) => `<label class="member-choice"><input type="checkbox" name="participants" value="${name}" ${selected.includes(name) ? "checked" : ""} /><span>${name}</span></label>`).join("");
-}
-
 function eventFormHtml(item = null) {
   const allDay = Boolean(item?.allDay);
   return `<div class="form-stack">
@@ -1714,19 +1707,16 @@ function eventFormHtml(item = null) {
     <label class="checkbox-label all-day-choice"><input name="allDay" type="checkbox" data-all-day-toggle ${allDay ? "checked" : ""} /> אירוע לכל היום</label>
     <div class="form-grid" id="event-time-fields" ${allDay ? "hidden" : ""}><label>שעת התחלה<input name="startTime" type="time" value="${escapeHtml(item?.startTime || "")}" /></label><label>שעת סיום<input name="endTime" type="time" value="${escapeHtml(item?.endTime || "")}" /></label></div>
     <label>הערות<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
-    <label>משתתפים<div class="member-choice-grid">${memberChoicesHtml(item?.participants || HOUSEHOLD_MEMBERS)}</div></label>
-    <div><div class="small muted" style="margin-bottom:7px">כתובות המייל נשמרות לזימונים הבאים</div><div class="form-grid"><label>המייל של איריס<input name="irisEmail" type="email" value="${escapeHtml(state.memberEmails.iris)}" /></label><label>המייל של תומר<input name="tomerEmail" type="email" value="${escapeHtml(state.memberEmails.tomer)}" /></label></div></div>
     <label>חזרתיות<select name="recurring"><option value="none" ${item?.recurring === "none" ? "selected" : ""}>ללא חזרה</option><option value="weekly" ${item?.recurring === "weekly" ? "selected" : ""}>שבועי</option><option value="monthly" ${item?.recurring === "monthly" ? "selected" : ""}>חודשי</option><option value="yearly" ${item?.recurring === "yearly" ? "selected" : ""}>שנתי</option></select></label>
   </div>`;
 }
 
 function submitEvent(formData, id = null) {
-  state.memberEmails = { iris: String(formData.get("irisEmail") || "").trim(), tomer: String(formData.get("tomerEmail") || "").trim() };
   const allDay = formData.get("allDay") === "on";
   const values = {
     title: String(formData.get("title") || "").trim(), date: formData.get("date"), allDay,
     startTime: allDay ? "" : formData.get("startTime"), endTime: allDay ? "" : formData.get("endTime"),
-    location: String(formData.get("location") || "").trim(), notes: String(formData.get("notes") || "").trim(), participants: formData.getAll("participants"), recurring: formData.get("recurring"),
+    location: String(formData.get("location") || "").trim(), notes: String(formData.get("notes") || "").trim(), recurring: formData.get("recurring"),
   };
   if (id) Object.assign(state.events.find((event) => event.id === id), values);
   else state.events.push({ id: crypto.randomUUID(), ...values });
@@ -1852,11 +1842,6 @@ function submitTripItem(formData, id = null) {
 
 /* Calendar invitations */
 /* Calendar invitations */
-function eventEmails(event) {
-  const participants = Array.isArray(event.participants) ? event.participants : [];
-  return [...new Set(participants.map((name) => name === "איריס" ? state.memberEmails.iris : state.memberEmails.tomer).filter(Boolean))];
-}
-
 function downloadICS(eventId) {
   const event = state.events.find((item) => item.id === eventId);
   if (!event) return;
@@ -1876,7 +1861,7 @@ function downloadICS(eventId) {
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nihul Habayit//Zilcha//HE", "CALSCALE:GREGORIAN", "METHOD:REQUEST",
     "BEGIN:VEVENT", `UID:${event.id}@nihul-habayit`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
     ...dateLines, `SUMMARY:${escapeIcs(event.title)}`, `LOCATION:${escapeIcs(event.location || "")}`, `DESCRIPTION:${escapeIcs(event.notes || "")}`,
-    ...eventEmails(event).map((email) => `ATTENDEE;RSVP=TRUE:mailto:${email}`), "END:VEVENT", "END:VCALENDAR",
+    "END:VEVENT", "END:VCALENDAR",
   ].join("\r\n");
   const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -1890,17 +1875,6 @@ function downloadICS(eventId) {
 
 function escapeIcs(value) {
   return String(value).replaceAll("\\", "\\\\").replaceAll(",", "\\,").replaceAll(";", "\\;").replaceAll("\n", "\\n");
-}
-
-function emailEvent(eventId) {
-  const event = state.events.find((item) => item.id === eventId);
-  if (!event) return;
-  const emails = eventEmails(event);
-  if (!emails.length) return showToast("לא הוגדרו כתובות מייל למשתתפים");
-  const subject = encodeURIComponent(`זימון: ${event.title}`);
-  const when = event.allDay ? "כל היום" : `${event.startTime || ""}${event.endTime ? `–${event.endTime}` : ""}`;
-  const body = encodeURIComponent(`${event.title}\n${formatDate(event.date)} ${when}\n${event.location || ""}\n\nנא לצרף את קובץ הזימון שהורד מהאפליקציה.`);
-  location.href = `mailto:${emails.join(",")}?subject=${subject}&body=${body}`;
 }
 
 function resetDemo() {

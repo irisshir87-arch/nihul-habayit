@@ -1414,32 +1414,11 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
 .wish-group-header .muted { color: #526da9; }
 .wish-list { padding: 0 14px 10px; }
 
-/* טיול — פעולות עריכה ומחיקה גלויות ונגישות */
-.trip-row { grid-template-columns: 22px minmax(0, 1fr) 92px 70px; }
-.trip-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
-.trip-action-button {
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: #fff;
-  color: #526078;
-}
-.trip-action-button:hover { background: var(--primary-soft); color: var(--primary); }
-.trip-action-button.danger { color: var(--danger); }
-.trip-action-button.danger:hover { background: #fff1f1; }
-.trip-action-button svg {
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
+/* טיול — פעולות בתפריט שלוש נקודות */
+.trip-category-section { overflow: visible; background: #fff; }
+.trip-category-header { border-radius: 10px 10px 0 0; }
+.trip-row { grid-template-columns: 22px minmax(0, 1fr) 92px 30px; }
+.trip-row > .more-menu { grid-column: 4; justify-self: end; }
 
 @media (max-width: 900px) {
   .task-assignee-grid { grid-template-columns: 1fr; }
@@ -1461,14 +1440,12 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
   .task-draggable-row.dragging { box-shadow: 0 10px 28px rgba(23,32,51,.2); }
   .wish-group-card { padding: 0; }
   .wish-list { padding-inline: 11px; }
-  .trip-row { grid-template-columns: 20px minmax(0, 1fr) 82px 64px; gap: 5px; }
-  .trip-action-button { width: 29px; height: 29px; }
+  .trip-row { grid-template-columns: 20px minmax(0, 1fr) 82px 28px; gap: 5px; }
 }
 
 @media (max-width: 390px) {
   .home-shopping-categories { grid-template-columns: 1fr; }
-  .trip-row { grid-template-columns: 20px minmax(0, 1fr) 76px 60px; }
-  .trip-action-button { width: 27px; height: 27px; }
+  .trip-row { grid-template-columns: 20px minmax(0, 1fr) 76px 28px; }
 }
 
 /* V15.2 — תיקוני מסך הבית וניהול קטגוריות */
@@ -1598,4 +1575,22 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
   .events-month-list { gap: 18px; }
   .events-month-heading h3 { font-size: 17px; }
   .events-month-group .events-card { border-top-width: 3px; }
+}
+
+
+/* V15.8 — אירועים ללא שיוך ופעולות טיול בתפריט שלוש נקודות */
+.event-list-header,
+.compact-event-row {
+  grid-template-columns: 58px minmax(160px, 1.35fr) minmax(145px, .9fr) 34px;
+}
+.compact-event-row > .more-menu { grid-column: 4; justify-self: end; }
+.trip-row > .more-menu { display: block; justify-self: end; }
+.trip-row > [data-edit-trip],
+.trip-row > [data-delete-trip] { display: none !important; }
+
+@media (max-width: 760px) {
+  .compact-event-row { grid-template-columns: 48px minmax(0, 1fr) 34px; gap: 8px; }
+  .compact-event-row .event-title-cell,
+  .compact-event-row .event-when-cell { grid-column: 2; }
+  .compact-event-row > .more-menu { grid-column: 3; grid-row: 1; }
 }
