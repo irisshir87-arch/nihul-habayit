@@ -11,6 +11,7 @@ const collator = new Intl.Collator("he", { sensitivity: "base", numeric: true })
 
 const HOUSEHOLD_MEMBERS = ["איריס", "תומר"];
 const TASK_ASSIGNEES = ["איריס", "תומר", "איריס ותומר"];
+const TASK_ASSIGNEE_LABELS = { "איריס": "איריס", "תומר": "תומר", "איריס ותומר": "ביחד" };
 const WISH_DEFAULT_CATEGORIES = ["בית", "ילדים", "תומר", "איריס", "מתכונים", "אטרקציות"];
 const SHOPPING_DEFAULT_CATEGORIES = [
   "בשר", "מאפים", "מוצרי חלב", "מזווה", "מתוקים", "נקניק",
@@ -616,13 +617,17 @@ function israelHolidayForDate(date) {
     "Tishri-1": "ראש השנה",
     "Tishri-2": "ראש השנה",
     "Tishri-10": "יום כיפור",
-    "Tishri-15": "סוכות",
     "Tishri-22": "שמחת תורה",
     "Nisan-15": "פסח",
     "Nisan-21": "שביעי של פסח",
     "Sivan-6": "שבועות",
   };
-  const title = holidays[key] || (isObservedIndependenceDay(date, hebrew) ? "יום העצמאות" : "");
+  let title = "";
+  if (hebrew.month === "Tishri" && hebrew.day >= 15 && hebrew.day <= 21) {
+    title = hebrew.day === 15 ? "סוכות" : hebrew.day === 21 ? "הושענא רבה" : "חול המועד סוכות";
+  } else {
+    title = holidays[key] || (isObservedIndependenceDay(date, hebrew) ? "יום העצמאות" : "");
+  }
   if (!title) return null;
   return {
     id: `holiday-${dateKey(date)}`,
@@ -660,9 +665,9 @@ function renderHome() {
   return `
     <section class="card home-calendar-card">
       <div class="calendar-toolbar">
-        <button type="button" class="calendar-nav-button" data-calendar-next aria-label="החודש הבא">‹</button>
-        <div><h3 class="card-title">לוח שנה</h3><strong class="calendar-month-title">${escapeHtml(monthTitle)}</strong></div>
         <button type="button" class="calendar-nav-button" data-calendar-prev aria-label="החודש הקודם">›</button>
+        <div><h3 class="card-title">לוח שנה</h3><strong class="calendar-month-title">${escapeHtml(monthTitle)}</strong></div>
+        <button type="button" class="calendar-nav-button" data-calendar-next aria-label="החודש הבא">‹</button>
       </div>
       ${calendarHtml(year, month)}
     </section>
@@ -764,8 +769,6 @@ function renderShopping() {
     : allPurchased.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
 
   return `<section class="shopping-page option-two-shopping-page">
-    <button class="shopping-add-category-link" type="button" data-add-shopping-category>＋ הוספת קטגוריה</button>
-
     <div class="shopping-filter-strip" role="tablist" aria-label="סינון לפי קטגוריה">
       ${shoppingFilterChipsHtml(allActive)}
     </div>
@@ -786,6 +789,10 @@ function renderShopping() {
         ${shoppingListHtml(visiblePurchased, true) || emptyHtml("עדיין לא סומנו פריטים כנרכשו")}
       </div>
     </details>
+
+    <div class="category-toolbar category-management-toolbar shopping-category-toolbar">
+      <button class="secondary-button compact-button" type="button" data-add-shopping-category>＋ הוספת קטגוריה</button>
+    </div>
   </section>`;
 }
 
@@ -952,12 +959,26 @@ function filterShoppingRows() {
 /* Events */
 function renderEvents() {
   const events = [...state.events].sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
-  return `<section class="events-page">
-    <section class="card events-card clean-list-card">
-      <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span>משתתפים</span><span></span></div>
-      <div class="compact-event-list">${events.map(eventFullHtml).join("") || emptyHtml("אין אירועים")}</div>
-    </section>
-  </section>`;
+  if (!events.length) return `<section class="events-page"><section class="card events-card clean-list-card">${emptyHtml("אין אירועים")}</section></section>`;
+
+  const groups = events.reduce((months, event) => {
+    const key = String(event.date || "").slice(0, 7) || "ללא-תאריך";
+    if (!months.has(key)) months.set(key, []);
+    months.get(key).push(event);
+    return months;
+  }, new Map());
+
+  return `<section class="events-page"><div class="events-month-list">${[...groups.entries()].map(([key, monthEvents]) => {
+    const firstDate = new Date(`${monthEvents[0].date}T12:00:00`);
+    const monthTitle = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(firstDate);
+    return `<section class="events-month-group">
+      <div class="events-month-heading"><h3>${escapeHtml(monthTitle)}</h3><span>${monthEvents.length} אירועים</span></div>
+      <section class="card events-card clean-list-card">
+        <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span>משתתפים</span><span></span></div>
+        <div class="compact-event-list">${monthEvents.map(eventFullHtml).join("")}</div>
+      </section>
+    </section>`;
+  }).join("")}</div></section>`;
 }
 
 function eventFullHtml(event) {
@@ -1000,8 +1021,9 @@ function renderTasks() {
 function taskAssigneeGroupHtml(assignee, tasks, completed) {
   const assignedTasks = tasks.filter((task) => task.assignee === assignee);
   const listKey = `${completed ? "completed" : "active"}-${assignee}`;
+  const assigneeLabel = TASK_ASSIGNEE_LABELS[assignee] || assignee;
   return `<section class="card task-assignee-card ${completed ? "completed-card" : ""}">
-    <div class="task-assignee-header"><h3>${escapeHtml(assignee)} <span>${assignedTasks.length}</span></h3></div>
+    <div class="task-assignee-header"><h3>${escapeHtml(assigneeLabel)} <span>${assignedTasks.length}</span></h3></div>
     <div class="task-simple-list" data-task-list="${escapeHtml(listKey)}">${assignedTasks.map((task) => taskCompactHtml(task, completed)).join("") || emptyHtml("אין סידורים")}</div>
   </section>`;
 }
@@ -1056,13 +1078,14 @@ function wishCategoryOptions(selected = "") {
 
 function renderWishes() {
   const categories = wishCategories();
-  if (wishCategoryFilter !== "הכל" && !categories.includes(wishCategoryFilter)) wishCategoryFilter = "הכל";
-  const visibleCategories = wishCategoryFilter === "הכל" ? categories : [wishCategoryFilter];
+  const populatedCategories = categories.filter((category) => state.wishes.some((wish) => wish.category === category));
+  if (wishCategoryFilter !== "הכל" && !populatedCategories.includes(wishCategoryFilter)) wishCategoryFilter = "הכל";
+  const visibleCategories = wishCategoryFilter === "הכל" ? populatedCategories : [wishCategoryFilter];
   return `<section class="planning-page">
-    <div class="category-toolbar category-filter-toolbar">
-      <label class="category-filter-label">סינון<select data-wish-filter><option value="הכל">הכל</option>${categories.map((category) => `<option value="${escapeHtml(category)}" ${wishCategoryFilter === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
-    </div>
-    <div class="wish-group-grid">${visibleCategories.map(wishGroupHtml).join("")}</div>
+    ${populatedCategories.length ? `<div class="category-toolbar category-filter-toolbar">
+      <label class="category-filter-label">סינון<select data-wish-filter><option value="הכל">הכל</option>${populatedCategories.map((category) => `<option value="${escapeHtml(category)}" ${wishCategoryFilter === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
+    </div>` : ""}
+    <div class="wish-group-grid">${visibleCategories.map(wishGroupHtml).join("") || emptyHtml("עדיין לא נוספו תכנונים")}</div>
     <div class="category-toolbar category-management-toolbar planning-management-toolbar">
       <button type="button" class="secondary-button compact-button" data-add-wish-category>＋ הוספת קטגוריה</button>
       <label class="category-manager-label">ניהול קטגוריה<select data-wish-category-manager>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("")}</select></label>
@@ -1081,14 +1104,14 @@ function wishHtml(wish) {
   const references = Array.isArray(wish.references) ? wish.references : [];
   return `<article class="wish-row">
     <div class="wish-main"><strong>${escapeHtml(wish.title)}</strong>${wish.note ? `<div class="list-meta">${escapeHtml(wish.note)}</div>` : ""}
-      ${references.length ? `<div class="reference-list">${references.map(referenceHtml).join("")}</div>` : `<div class="list-meta">לא נוספו קישורים</div>`}
+      ${references.length ? `<ol class="reference-list">${references.map(referenceHtml).join("")}</ol>` : ""}
     </div>
     ${moreMenuHtml(`<button type="button" data-edit-wish="${wish.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-wish="${wish.id}">מחיקה</button>`)}
   </article>`;
 }
 
 function referenceHtml(reference, index) {
-  return `<a class="reference-chip" href="${escapeHtml(reference)}" target="_blank" rel="noopener">קישור ${index + 1}</a>`;
+  return `<li><a class="reference-chip" href="${escapeHtml(reference)}" target="_blank" rel="noopener">קישור ${index + 1}</a></li>`;
 }
 
 function addWishCategory() {
@@ -1096,7 +1119,7 @@ function addWishCategory() {
   if (!category) return;
   if (wishCategories().some((existing) => normalizeName(existing) === normalizeName(category))) return showToast("הקטגוריה כבר קיימת");
   state.wishCategories = [...wishCategories(), category];
-  wishCategoryFilter = category;
+  wishCategoryFilter = "הכל";
   saveState("הקטגוריה נוספה");
   render();
 }
@@ -1574,6 +1597,7 @@ function openEditDialog(type, id) {
 }
 
 function showConfiguredDialog(config) {
+  document.querySelectorAll("details[open]").forEach((details) => details.removeAttribute("open"));
   dialogSubmit.hidden = false;
   dialogSubmit.textContent = config.submitLabel;
   dialogEyebrow.textContent = config.eyebrow;
@@ -1583,7 +1607,12 @@ function showConfiguredDialog(config) {
     event.preventDefault();
     config.submit(new FormData(dialogForm));
   };
+  if (dialog.open) dialog.close();
   dialog.showModal();
+  requestAnimationFrame(() => {
+    dialog.scrollTop = 0;
+    dialog.querySelector(".dialog-card")?.scrollTo({ top: 0, behavior: "auto" });
+  });
   const allDayToggle = dialogBody.querySelector("[data-all-day-toggle]");
   const timeFields = dialogBody.querySelector("#event-time-fields");
   if (allDayToggle && timeFields) {
@@ -1708,9 +1737,9 @@ function submitEvent(formData, id = null) {
 
 function taskFormHtml(item = null) {
   return `<div class="form-stack">
-    <label>שם הסידור<input name="title" required autofocus value="${escapeHtml(item?.title || "")}" /></label>
+    <label>שם הסידור<input name="title" required ${item ? "" : "autofocus"} value="${escapeHtml(item?.title || "")}" /></label>
     <label>תיאור<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
-    <div class="form-grid"><label>שיוך<select name="assignee">${TASK_ASSIGNEES.map((assignee) => `<option ${item?.assignee === assignee ? "selected" : ""}>${assignee}</option>`).join("")}</select></label><label>קטגוריה<select name="category">${taskCategoryOptions(item?.category || "אחר")}</select></label></div>
+    <div class="form-grid"><label>שיוך<select name="assignee">${TASK_ASSIGNEES.map((assignee) => `<option value="${escapeHtml(assignee)}" ${item?.assignee === assignee ? "selected" : ""}>${escapeHtml(TASK_ASSIGNEE_LABELS[assignee] || assignee)}</option>`).join("")}</select></label><label>קטגוריה<select name="category">${taskCategoryOptions(item?.category || "אחר")}</select></label></div>
   </div>`;
 }
 

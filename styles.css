@@ -428,8 +428,22 @@ html, body { max-width: 100%; overflow-x: hidden; }
 .wish-row:last-child { border-bottom: 0; }
 .wish-main { min-width: 0; }
 .row-wrap { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.reference-list { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
-.reference-chip { display: inline-flex; padding: 5px 8px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-size: 11px; font-weight: 800; text-decoration: none; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reference-list {
+  display: grid;
+  gap: 5px;
+  margin: 8px 0 0;
+  padding-inline-start: 22px;
+  list-style-position: outside;
+}
+.reference-list li { padding-inline-start: 2px; color: var(--muted); font-size: 12px; }
+.reference-chip {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
 
 /* התארגנות לטיול */
 .trip-progress-card { margin-bottom: 16px; padding: 16px; }
@@ -1196,7 +1210,6 @@ body.task-dragging { user-select: none; }
 .wish-row { grid-template-columns: minmax(0, 1fr) 30px; }
 .wish-main > strong { display: block; font-size: 14px; }
 .reference-list { margin-top: 7px; }
-.reference-chip { max-width: 100%; }
 
 /* טיול וארכיון */
 .trip-page { display: grid; gap: 12px; max-width: 920px; margin-inline: auto; }
@@ -1525,3 +1538,64 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
 
 /* V15.3 — הוספת קטגוריות בסידורים */
 .task-category-toolbar { justify-content: flex-start; }
+
+
+/* V15.4 — חלונות עריכה, חודשים באירועים וכיווני לוח שנה */
+.app-dialog[open] {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: max(12px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+.app-dialog[open] .dialog-card {
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+
+.calendar-toolbar {
+  direction: ltr;
+  grid-template-areas: "next title prev";
+}
+.calendar-toolbar > div { grid-area: title; direction: rtl; }
+.calendar-toolbar [data-calendar-next] { grid-area: next; }
+.calendar-toolbar [data-calendar-prev] { grid-area: prev; }
+
+.events-month-list { display: grid; gap: 24px; }
+.events-month-group { display: grid; gap: 8px; }
+.events-month-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 4px;
+}
+.events-month-heading h3 { margin: 0; font-size: 20px; font-weight: 900; }
+.events-month-heading span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 850;
+}
+.events-month-group .events-card { border-top: 4px solid #cad8fb; }
+
+.shopping-category-toolbar { justify-content: flex-start; }
+
+@media (max-width: 760px) {
+  .app-dialog[open] { padding-inline: 8px; }
+  .app-dialog[open] .dialog-card {
+    width: 100%;
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .events-month-list { gap: 18px; }
+  .events-month-heading h3 { font-size: 17px; }
+  .events-month-group .events-card { border-top-width: 3px; }
+}
