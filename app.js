@@ -17,15 +17,24 @@ const SHOPPING_DEFAULT_CATEGORIES = [
   "ניקיון", "פארם", "פירות וירקות", "קפואים", "שתייה", "אחר"
 ];
 const TRIP_DEFAULT_CATEGORIES = ["אוכל", "רחצה", "תרופות", "בגדים", "ציוד"];
-const TASK_CATEGORIES = ["אוטו", "בית", "ילדים", "כספים", "בריאות", "עבודה", "אחר"];
+const TASK_CATEGORIES = ["אוטו", "בית", "ילדים", "כספים", "בריאות", "פארם", "עבודה", "אחר"];
+
+const NAV_ICONS = {
+  home: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 11.5 12 4l9 7.5"/><path d="M5.5 10.5V20h13v-9.5"/><path d="M9.5 20v-6h5v6"/></svg>`,
+  shopping: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h2l2.1 10.2a2 2 0 0 0 2 1.6h7.8a2 2 0 0 0 2-1.6L20.5 8H6"/><circle cx="10" cy="19" r="1.3"/><circle cx="17" cy="19" r="1.3"/></svg>`,
+  events: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="15" rx="2"/><path d="M7.5 3.5v4M16.5 3.5v4M3.5 9.5h17"/><path d="M8 13h3M13 13h3M8 17h3"/></svg>`,
+  tasks: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="m7 9 1.5 1.5L11 8M13 9h4M7 15l1.5 1.5L11 14M13 15h4"/></svg>`,
+  wishes: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 8.8c0 5.1-8.5 10.2-8.5 10.2S3.5 13.9 3.5 8.8A4.3 4.3 0 0 1 12 7.7a4.3 4.3 0 0 1 8.5 1.1Z"/></svg>`,
+  trip: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="14" rx="2"/><path d="M9 7V5.5A2.5 2.5 0 0 1 11.5 3h1A2.5 2.5 0 0 1 15 5.5V7M9 12v4M15 12v4M5 13h14"/></svg>`,
+};
 
 const NAV_ITEMS = [
-  { id: "home", label: "בית", icon: "⌂" },
-  { id: "shopping", label: "קניות", icon: "🛒" },
-  { id: "events", label: "אירועים", icon: "📅" },
-  { id: "tasks", label: "סידורים", icon: "✓" },
-  { id: "wishes", label: "תכנונים", icon: "♡" },
-  { id: "trip", label: "טיול", icon: "🎒" },
+  { id: "home", label: "בית", icon: NAV_ICONS.home },
+  { id: "shopping", label: "קניות", icon: NAV_ICONS.shopping },
+  { id: "events", label: "אירועים", icon: NAV_ICONS.events },
+  { id: "tasks", label: "סידורים", icon: NAV_ICONS.tasks },
+  { id: "wishes", label: "תכנונים", icon: NAV_ICONS.wishes },
+  { id: "trip", label: "טיול", icon: NAV_ICONS.trip },
 ];
 
 const defaultState = {
@@ -532,12 +541,12 @@ function navigate(screen) {
 function render() {
   renderNavigation();
   const item = NAV_ITEMS.find((navItem) => navItem.id === currentScreen) || NAV_ITEMS[0];
-  screenTitle.textContent = item.label;
-  const showEyebrow = currentScreen === "home";
-  screenEyebrow.hidden = !showEyebrow;
-  screenEyebrow.textContent = showEyebrow ? "ניהול הבית · משפחת זילכה" : "";
-  quickAdd.hidden = currentScreen === "shopping" || currentScreen === "events";
-  quickAdd.textContent = currentScreen === "home" ? "＋ הוספה מהירה" : `＋ ${addLabel(currentScreen)}`;
+  const showHomeIdentity = currentScreen === "home";
+  screenTitle.textContent = showHomeIdentity ? "ניהול הבית" : item.label;
+  screenEyebrow.hidden = !showHomeIdentity;
+  screenEyebrow.textContent = showHomeIdentity ? "משפחת זילכה" : "";
+  quickAdd.hidden = false;
+  quickAdd.textContent = showHomeIdentity ? "＋ הוספה מהירה" : `＋ ${addLabel(currentScreen)}`;
   quickAdd.onclick = () => currentScreen === "home" ? openQuickAdd() : openAddDialog(currentScreen);
 
   const renderers = {
@@ -633,9 +642,12 @@ function calendarEntriesForDate(key) {
 }
 
 function renderHome() {
-  const activeShopping = state.shopping
-    .filter((item) => !item.purchased)
-    .sort((a, b) => collator.compare(a.category || "אחר", b.category || "אחר") || collator.compare(a.name, b.name));
+  const activeShopping = state.shopping.filter((item) => !item.purchased);
+  const shoppingCounts = [...activeShopping.reduce((counts, item) => {
+    const category = item.category || "אחר";
+    counts.set(category, (counts.get(category) || 0) + 1);
+    return counts;
+  }, new Map()).entries()].sort((a, b) => collator.compare(a[0], b[0]));
   const year = calendarViewDate.getFullYear();
   const month = calendarViewDate.getMonth();
   const monthTitle = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(calendarViewDate);
@@ -647,19 +659,16 @@ function renderHome() {
         <button type="button" class="calendar-nav-button" data-calendar-prev aria-label="החודש הקודם">›</button>
       </div>
       ${calendarHtml(year, month)}
+      ${calendarMonthAgendaHtml(year, month)}
     </section>
     <section class="card home-shopping-card">
-      <div class="card-title-row"><h3 class="card-title">רשימת הקניות הפעילה</h3><button class="link-button" data-nav="shopping">לכל רשימת הקניות</button></div>
-      <div class="home-shopping-list">${activeShopping.map(homeShoppingItemHtml).join("") || emptyHtml("רשימת הקניות ריקה")}</div>
+      <div class="card-title-row"><div><h3 class="card-title">קניות לפי קטגוריה</h3><span class="muted small">${activeShopping.length} פריטים פעילים</span></div><button class="link-button" data-nav="shopping">לרשימת הקניות</button></div>
+      <div class="home-shopping-categories">${shoppingCounts.map(([category, count]) => homeShoppingCategoryHtml(category, count)).join("") || emptyHtml("רשימת הקניות ריקה")}</div>
     </section>`;
 }
 
-function homeShoppingItemHtml(item) {
-  return `<div class="home-shopping-row">
-    <button class="checkbox" data-shopping-toggle="${item.id}" aria-label="סימון ${escapeHtml(item.name)} כנרכש"></button>
-    <div class="home-shopping-name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "אחר")}</small></div>
-    <span class="home-shopping-quantity">${positiveInteger(item.quantity)}</span>
-  </div>`;
+function homeShoppingCategoryHtml(category, count) {
+  return `<button type="button" class="home-shopping-category" data-nav="shopping"><span class="home-shopping-category-icon">${shoppingCategoryIcon(category)}</span><span>${escapeHtml(category)}</span><strong>${count}</strong></button>`;
 }
 
 function calendarHtml(year, monthIndex) {
@@ -694,6 +703,26 @@ function calendarHtml(year, monthIndex) {
   }
 
   return `<div class="calendar">${cells.join("")}</div>`;
+}
+
+function calendarMonthAgendaHtml(year, monthIndex) {
+  const entries = [];
+  const daysInMonth = new Date(year, monthIndex + 1, 0, 12).getDate();
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = new Date(year, monthIndex, day, 12);
+    const key = dateKey(date);
+    calendarEntriesForDate(key).forEach((event) => entries.push({ ...event, key, date }));
+  }
+  const visible = entries.slice(0, 8);
+  return `<div class="calendar-mobile-agenda">
+    <div class="calendar-agenda-title">אירועים בחודש</div>
+    ${visible.map((event) => {
+      const dateLabel = new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short" }).format(event.date);
+      const time = event.allDay ? "כל היום" : (event.startTime || "");
+      return `<button type="button" class="calendar-agenda-row ${event.isHoliday ? "holiday" : ""}" data-calendar-day="${event.key}"><span class="calendar-agenda-date">${escapeHtml(dateLabel)}</span><span class="calendar-agenda-name">${escapeHtml(event.title)}</span><span class="calendar-agenda-time">${escapeHtml(time)}</span></button>`;
+    }).join("") || `<div class="calendar-agenda-empty">אין אירועים בחודש זה</div>`}
+    ${entries.length > visible.length ? `<button type="button" class="calendar-agenda-more" data-nav="events">לכל האירועים</button>` : ""}
+  </div>`;
 }
 
 function changeCalendarMonth(delta) {
@@ -737,10 +766,6 @@ function renderShopping() {
     : allPurchased.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
 
   return `<section class="shopping-page option-two-shopping-page">
-    <button class="shopping-add-bar" type="button" data-add-shopping-item>
-      <span class="shopping-add-plus">＋</span><span>הוספת מוצר לרשימה…</span>
-    </button>
-
     <button class="shopping-add-category-link" type="button" data-add-shopping-category>＋ הוספת קטגוריה</button>
 
     <div class="shopping-filter-strip" role="tablist" aria-label="סינון לפי קטגוריה">
@@ -930,7 +955,6 @@ function filterShoppingRows() {
 function renderEvents() {
   const events = [...state.events].sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
   return `<section class="events-page">
-    <div class="page-inline-actions"><button class="primary-button" type="button" data-add="events">＋ אירוע</button></div>
     <section class="card events-card clean-list-card">
       <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span>משתתפים</span><span></span></div>
       <div class="compact-event-list">${events.map(eventFullHtml).join("") || emptyHtml("אין אירועים")}</div>
@@ -956,13 +980,20 @@ function renderTasks() {
   const active = state.tasks.filter((task) => !task.completed).sort(sortTasks);
   const completed = state.tasks.filter((task) => task.completed).sort(sortTasks);
   return `<section class="task-page">
-    <section class="card task-list-card">
-      <div class="task-simple-list" data-task-list="active">${active.map((task) => taskCompactHtml(task, false)).join("") || emptyHtml("אין סידורים לביצוע")}</div>
-    </section>
+    <div class="task-assignee-grid">${TASK_ASSIGNEES.map((assignee) => taskAssigneeGroupHtml(assignee, active, false)).join("")}</div>
     <details class="completed-section">
       <summary>סידורים שבוצעו <span class="count-pill completed">${completed.length}</span></summary>
-      <section class="card task-list-card completed-card"><div class="task-simple-list" data-task-list="completed">${completed.map((task) => taskCompactHtml(task, true)).join("") || emptyHtml("אין סידורים שבוצעו")}</div></section>
+      <div class="task-assignee-grid completed-task-grid">${TASK_ASSIGNEES.map((assignee) => taskAssigneeGroupHtml(assignee, completed, true)).join("")}</div>
     </details>
+  </section>`;
+}
+
+function taskAssigneeGroupHtml(assignee, tasks, completed) {
+  const assignedTasks = tasks.filter((task) => task.assignee === assignee);
+  const listKey = `${completed ? "completed" : "active"}-${assignee}`;
+  return `<section class="card task-assignee-card ${completed ? "completed-card" : ""}">
+    <div class="task-assignee-header"><span class="assignee-avatar">${escapeHtml(assignee === "איריס ותומר" ? "ביחד" : assignee)}</span><div><h4>${escapeHtml(assignee)}</h4><small>${assignedTasks.length} סידורים</small></div></div>
+    <div class="task-simple-list" data-task-list="${escapeHtml(listKey)}">${assignedTasks.map((task) => taskCompactHtml(task, completed)).join("") || emptyHtml("אין סידורים")}</div>
   </section>`;
 }
 
@@ -975,7 +1006,7 @@ function taskCompactHtml(task, completed) {
   return `<article class="task-compact-row task-draggable-row ${expanded ? "expanded" : ""}" data-task-id="${task.id}" data-task-completed="${completed}" draggable="true">
     <button class="checkbox ${completed ? "checked" : ""}" data-task-toggle="${task.id}" aria-label="${completed ? "החזרה לביצוע" : "סימון כהושלם"}">${completed ? "✓" : ""}</button>
     <button type="button" class="task-title-button" ${task.notes ? `data-task-expand="${task.id}" aria-expanded="${expanded}"` : "disabled"}>
-      <span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span>${task.notes ? `<span class="task-expand-icon">⌄</span>` : ""}
+      <span class="task-title-copy"><span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span><small>${escapeHtml(task.category || "אחר")}</small></span>${task.notes ? `<span class="task-expand-icon">⌄</span>` : ""}
     </button>
     <button type="button" class="task-drag-handle" data-task-drag-handle="${task.id}" aria-label="גרירת הסידור לשינוי סדר" title="גרירה לשינוי סדר">⋮⋮</button>
     ${moreMenuHtml(`<button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button>`)}
@@ -1113,11 +1144,14 @@ function tripCategoryHtml(category) {
 }
 
 function tripItemHtml(item) {
-  return `<div class="trip-row">
+  return `<div class="trip-row" data-trip-id="${item.id}">
     <button class="checkbox ${item.packed ? "checked" : ""}" data-trip-toggle="${item.id}" aria-label="${item.packed ? "סימון כלא ארוז" : "סימון כארוז"}">${item.packed ? "✓" : ""}</button>
     <div class="list-main"><div class="list-title ${item.packed ? "strike" : ""}">${escapeHtml(item.name)}</div></div>
     <div class="quantity-stepper always-visible"><button class="stepper-button" data-trip-quantity="${item.id}" data-delta="-1">−</button><strong>${positiveInteger(item.quantity)}</strong><button class="stepper-button" data-trip-quantity="${item.id}" data-delta="1">＋</button></div>
-    ${moreMenuHtml(`<button type="button" data-edit-trip="${item.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-trip="${item.id}">העברה לארכיון</button>`)}
+    <div class="trip-row-actions">
+      <button type="button" class="trip-action-button" data-edit-trip="${item.id}" aria-label="עריכת ${escapeHtml(item.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/><path d="m14.5 7.5 3 3"/></svg></button>
+      <button type="button" class="trip-action-button danger" data-delete-trip="${item.id}" aria-label="מחיקת ${escapeHtml(item.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg></button>
+    </div>
   </div>`;
 }
 
@@ -1227,7 +1261,7 @@ function attachScreenEvents() {
   document.querySelectorAll("[data-trip-toggle]").forEach((button) => button.addEventListener("click", () => toggleTrip(button.dataset.tripToggle)));
   document.querySelectorAll("[data-trip-quantity]").forEach((button) => button.addEventListener("click", () => updateTripQuantity(button.dataset.tripQuantity, button.dataset.delta)));
   document.querySelectorAll("[data-edit-trip]").forEach((button) => button.addEventListener("click", () => openEditDialog("trip", button.dataset.editTrip)));
-  document.querySelectorAll("[data-delete-trip]").forEach((button) => button.addEventListener("click", () => archiveTripItem(button.dataset.deleteTrip)));
+  document.querySelectorAll("[data-delete-trip]").forEach((button) => button.addEventListener("click", () => deleteTripItem(button.dataset.deleteTrip)));
   document.querySelector("[data-reset-trip]")?.addEventListener("click", resetTripList);
   document.querySelector("[data-add-trip-category]")?.addEventListener("click", addTripCategory);
   document.querySelector("[data-rename-trip-category]")?.addEventListener("click", renameTripCategory);
@@ -1324,27 +1358,16 @@ function startTaskPointerDrag(event) {
   if (!row || !list) return;
   event.preventDefault();
   const pointerId = event.pointerId;
-  const delay = event.pointerType === "mouse" ? 0 : 380;
-  const drag = { handle, row, list, pointerId, active: false, timer: null };
+  const drag = { handle, row, list, pointerId, active: true };
   taskDragState = drag;
+  row.classList.add("dragging");
+  document.body.classList.add("task-dragging");
+  suppressTaskClickUntil = Date.now() + 450;
   try { handle.setPointerCapture(pointerId); } catch (error) { /* no-op */ }
 
-  const activate = () => {
-    if (taskDragState !== drag) return;
-    drag.active = true;
-    row.classList.add("dragging");
-    document.body.classList.add("task-dragging");
-  };
-  if (delay === 0) activate();
-  else drag.timer = setTimeout(activate, delay);
-
   const move = (moveEvent) => {
-    if (taskDragState !== drag || moveEvent.pointerId !== pointerId || !drag.active) return;
+    if (taskDragState !== drag || moveEvent.pointerId !== pointerId) return;
     if (moveEvent.cancelable) moveEvent.preventDefault();
-
-    // Determine the insertion point from the vertical pointer position instead
-    // of relying on elementFromPoint. This stays reliable while the dragged row
-    // is under the finger and when pointer capture is active on mobile devices.
     const candidates = [...list.querySelectorAll("[data-task-id]")].filter((candidate) => candidate !== row);
     const insertBefore = candidates.find((candidate) => {
       const rect = candidate.getBoundingClientRect();
@@ -1352,27 +1375,28 @@ function startTaskPointerDrag(event) {
     });
     if (insertBefore) list.insertBefore(row, insertBefore);
     else list.appendChild(row);
+
+    const edge = 70;
+    if (moveEvent.clientY < edge) window.scrollBy({ top: -18, behavior: "auto" });
+    else if (moveEvent.clientY > window.innerHeight - edge) window.scrollBy({ top: 18, behavior: "auto" });
   };
 
   const finish = (endEvent) => {
     if (endEvent.pointerId !== pointerId) return;
-    clearTimeout(drag.timer);
-    handle.removeEventListener("pointermove", move);
-    handle.removeEventListener("pointerup", finish);
-    handle.removeEventListener("pointercancel", finish);
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", finish);
+    window.removeEventListener("pointercancel", finish);
     try { handle.releasePointerCapture(pointerId); } catch (error) { /* no-op */ }
-    if (drag.active) {
-      row.classList.remove("dragging");
-      document.body.classList.remove("task-dragging");
-      suppressTaskClickUntil = Date.now() + 450;
-      persistTaskOrderFromDom();
-    }
+    row.classList.remove("dragging");
+    document.body.classList.remove("task-dragging");
+    suppressTaskClickUntil = Date.now() + 450;
     if (taskDragState === drag) taskDragState = null;
+    persistTaskOrderFromDom();
   };
 
-  handle.addEventListener("pointermove", move);
-  handle.addEventListener("pointerup", finish);
-  handle.addEventListener("pointercancel", finish);
+  window.addEventListener("pointermove", move, { passive: false });
+  window.addEventListener("pointerup", finish);
+  window.addEventListener("pointercancel", finish);
 }
 
 function persistTaskOrderFromDom() {
@@ -1390,6 +1414,15 @@ function toggleTrip(id) {
   item.packed = !item.packed;
   item.packedAt = item.packed ? new Date().toISOString() : null;
   saveState(item.packed ? "הפריט סומן כארוז" : "הפריט הוחזר לציוד שצריך לארוז");
+  render();
+}
+
+function deleteTripItem(id) {
+  const item = state.tripItems.find((existing) => existing.id === id);
+  if (!item) return;
+  if (!confirm(`למחוק את „${item.name}” מרשימת הטיול?`)) return;
+  state.tripItems = state.tripItems.filter((existing) => existing.id !== id);
+  saveState("הפריט נמחק מרשימת הטיול");
   render();
 }
 
