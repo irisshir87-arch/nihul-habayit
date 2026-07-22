@@ -320,16 +320,67 @@ async function initializeApp() {
     APP_CONFIG.supabasePublishableKey
   );
 
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (session?.user) await startCloudApp(session.user);
-  else showLogin();
+ let passwordRecoveryHandled = false;
 
-  supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
-    setTimeout(() => {
-      if (nextSession?.user) startCloudApp(nextSession.user);
-      else showLogin();
-    }, 0);
+async function handlePasswordRecovery(nextSession) {
+  if (passwordRecoveryHandled || !nextSession?.user) return;
+  passwordRecoveryHandled = true;
+
+  const newPassword = window.prompt(
+    "הקלידי סיסמה חדשה לחשבון המשפחתי (לפחות 6 תווים):"
+  );
+
+  if (!newPassword) {
+    passwordRecoveryHandled = false;
+    showLogin();
+    return;
+  }
+
+  if (newPassword.length < 6) {
+    window.alert("הסיסמה חייבת להכיל לפחות 6 תווים.");
+    passwordRecoveryHandled = false;
+    return;
+  }
+
+  const confirmation = window.prompt("הקלידי שוב את הסיסמה החדשה:");
+
+  if (newPassword !== confirmation) {
+    window.alert("הסיסמאות אינן תואמות.");
+    passwordRecoveryHandled = false;
+    return;
+  }
+
+  const { error } = await supabaseClient.auth.updateUser({
+    password: newPassword
   });
+
+  if (error) {
+    window.alert(`לא ניתן לעדכן את הסיסמה: ${error.message}`);
+    passwordRecoveryHandled = false;
+    return;
+  }
+
+  window.history.replaceState({}, document.title, window.location.pathname);
+  window.alert("הסיסמה עודכנה בהצלחה.");
+  await startCloudApp(nextSession.user);
+}
+
+supabaseClient.auth.onAuthStateChange((event, nextSession) => {
+  setTimeout(async () => {
+    if (event === "PASSWORD_RECOVERY") {
+      await handlePasswordRecovery(nextSession);
+      return;
+    }
+
+    if (nextSession?.user) await startCloudApp(nextSession.user);
+    else showLogin();
+  }, 0);
+});
+
+const { data: { session } } = await supabaseClient.auth.getSession();
+
+if (session?.user) await startCloudApp(session.user);
+else showLogin();
 }
 
 function showToast(message) {
