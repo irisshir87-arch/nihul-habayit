@@ -1457,3 +1457,71 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
   .trip-row { grid-template-columns: 20px minmax(0, 1fr) 76px 60px; }
   .trip-action-button { width: 27px; height: 27px; }
 }
+
+/* V15.2 — תיקוני מסך הבית וניהול קטגוריות */
+.home-shopping-title-row { align-items: center; }
+.home-shopping-actions { display: flex; align-items: center; justify-content: flex-start; gap: 7px; flex-wrap: wrap; }
+
+/* בלוח השנה מוצגים עד שני אירועים ורק אירועים נוספים מעבר לכך נספרים */
+@media (max-width: 760px) {
+  .home-calendar-card .calendar-day { min-height: 70px; }
+  .home-calendar-card .calendar-day-events { gap: 1px; }
+  .calendar-event-2 { display: block !important; }
+  .calendar-more-events { display: block !important; padding: 1px 2px; font-size: 7px; }
+  .calendar-mobile-agenda { display: none !important; }
+  .home-shopping-title-row { align-items: flex-start; }
+  .home-shopping-actions { justify-content: flex-end; }
+  .home-shopping-actions .compact-button,
+  .home-shopping-actions .link-button { font-size: 11px; }
+}
+
+/* סידורים — כותרת אחת מודגשת לכל אחראי */
+.task-assignee-card { padding: 0; overflow: hidden; }
+.task-assignee-header {
+  display: block;
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid #d8e3fb;
+  background: var(--primary-soft);
+  color: #244dba;
+}
+.task-assignee-header h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  color: inherit;
+  font-size: 16px;
+  font-weight: 900;
+}
+.task-assignee-header h3 span {
+  min-width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--primary);
+  font-size: 11px;
+}
+.task-assignee-card .task-simple-list { padding: 0 12px 8px; }
+.task-assignee-card .empty-state { padding: 22px 6px; }
+.completed-card .task-assignee-header { background: #f2f4f8; color: #657084; border-bottom-color: var(--border); }
+
+/* ניהול קטגוריות מופיע בתחתית תכנונים וטיול */
+.category-filter-toolbar { max-width: 330px; }
+.category-management-toolbar { margin-top: 14px; margin-bottom: 0; }
+.planning-management-toolbar { clear: both; }
+.trip-category-toolbar { order: 10; }
+
+@media (max-width: 760px) {
+  .task-assignee-card { padding: 0; }
+  .task-assignee-header { padding: 11px 12px; }
+  .task-assignee-card .task-simple-list { padding-inline: 9px; }
+  .category-filter-toolbar { max-width: none; }
+  .category-management-toolbar { margin-top: 10px; }
+}
+
+/* V15.3 — הוספת קטגוריות בסידורים */
+.task-category-toolbar { justify-content: flex-start; }
