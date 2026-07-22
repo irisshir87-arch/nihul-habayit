@@ -11,12 +11,13 @@ const collator = new Intl.Collator("he", { sensitivity: "base", numeric: true })
 
 const HOUSEHOLD_MEMBERS = ["איריס", "תומר"];
 const TASK_ASSIGNEES = ["איריס", "תומר", "איריס ותומר"];
-const WISH_GROUPS = ["בית", "ילדים", "תומר", "איריס"];
+const WISH_DEFAULT_CATEGORIES = ["בית", "ילדים", "תומר", "איריס", "מתכונים", "אטרקציות"];
 const SHOPPING_DEFAULT_CATEGORIES = [
   "בשר", "מאפים", "מוצרי חלב", "מזווה", "מתוקים", "נקניק",
   "ניקיון", "פארם", "פירות וירקות", "קפואים", "שתייה", "אחר"
 ];
-const TRIP_CATEGORIES = ["אוכל", "רחצה", "תרופות", "בגדים", "ציוד"];
+const TRIP_DEFAULT_CATEGORIES = ["אוכל", "רחצה", "תרופות", "בגדים", "ציוד"];
+const TASK_CATEGORIES = ["אוטו", "בית", "ילדים", "כספים", "בריאות", "עבודה", "אחר"];
 
 const NAV_ITEMS = [
   { id: "home", label: "בית", icon: "⌂" },
@@ -43,17 +44,19 @@ const defaultState = {
     { id: crypto.randomUUID(), title: "ערב זוגי", date: "2026-07-29", allDay: false, startTime: "20:30", endTime: "23:00", location: "תל אביב", notes: "", participants: ["איריס", "תומר"], recurring: "none" },
   ],
   tasks: [
-    { id: crypto.randomUUID(), title: "להזמין טכנאי למזגן", assignee: "תומר", priority: "גבוהה", category: "בית", notes: "המזגן בחדר הילדים", recurring: "none", completed: false, completedAt: null },
-    { id: crypto.randomUUID(), title: "להחזיר ספרים לספרייה", assignee: "איריס", priority: "בינונית", category: "ילדים", notes: "", recurring: "none", completed: false, completedAt: null },
-    { id: crypto.randomUUID(), title: "לשלם חשבון מים", assignee: "איריס ותומר", priority: "גבוהה", category: "כספים", notes: "", recurring: "none", completed: false, completedAt: null },
-    { id: crypto.randomUUID(), title: "לקבוע תור לרופא", assignee: "איריס", priority: "נמוכה", category: "בריאות", notes: "", recurring: "none", completed: true, completedAt: "2026-07-18T09:15:00" },
+    { id: crypto.randomUUID(), title: "להזמין טכנאי למזגן", assignee: "תומר", category: "בית", notes: "המזגן בחדר הילדים", completed: false, completedAt: null, order: 0 },
+    { id: crypto.randomUUID(), title: "להחזיר ספרים לספרייה", assignee: "איריס", category: "ילדים", notes: "", completed: false, completedAt: null, order: 1 },
+    { id: crypto.randomUUID(), title: "לשלם חשבון מים", assignee: "איריס ותומר", category: "כספים", notes: "", completed: false, completedAt: null, order: 2 },
+    { id: crypto.randomUUID(), title: "לקבוע תור לרופא", assignee: "איריס", category: "בריאות", notes: "", completed: true, completedAt: "2026-07-18T09:15:00", order: 3 },
   ],
+  wishCategories: [...WISH_DEFAULT_CATEGORIES],
   wishes: [
-    { id: crypto.randomUUID(), title: "ארון ויטרינה לסלון", group: "בית", description: "ארון צר ליד המרפסת בגוון עץ בהיר", references: ["https://example.com/vitrina"], priority: "גבוהה", status: "בבדיקה" },
-    { id: crypto.randomUUID(), title: "אופניים חדשים לאלון", group: "ילדים", description: "גלגלי 16 אינץ׳", references: [], priority: "בינונית", status: "רעיון" },
-    { id: crypto.randomUUID(), title: "שואב אבק אלחוטי", group: "תומר", description: "לבדוק דגמים עם תחנת ריקון", references: [], priority: "נמוכה", status: "בבדיקה" },
-    { id: crypto.randomUUID(), title: "סוף שבוע בצפון", group: "איריס", description: "מלון משפחתי עם בריכה", references: [], priority: "גבוהה", status: "מתוכנן" },
+    { id: crypto.randomUUID(), title: "ארון ויטרינה לסלון", category: "בית", note: "ארון צר ליד המרפסת בגוון עץ בהיר", references: ["https://example.com/vitrina"] },
+    { id: crypto.randomUUID(), title: "אופניים חדשים לאלון", category: "ילדים", note: "גלגלי 16 אינץ׳", references: [] },
+    { id: crypto.randomUUID(), title: "שואב אבק אלחוטי", category: "תומר", note: "לבדוק דגמים עם תחנת ריקון", references: [] },
+    { id: crypto.randomUUID(), title: "סוף שבוע בצפון", category: "איריס", note: "מלון משפחתי עם בריכה", references: [] },
   ],
+  tripCategories: [...TRIP_DEFAULT_CATEGORIES],
   tripItems: [
     { id: crypto.randomUUID(), name: "בקבוקי מים", category: "אוכל", quantity: 4, packed: false, packedAt: null },
     { id: crypto.randomUUID(), name: "מגבות", category: "רחצה", quantity: 4, packed: false, packedAt: null },
@@ -61,11 +64,18 @@ const defaultState = {
     { id: crypto.randomUUID(), name: "בגדי החלפה לילדים", category: "בגדים", quantity: 2, packed: false, packedAt: null },
     { id: crypto.randomUUID(), name: "מטען לטלפון", category: "ציוד", quantity: 1, packed: true, packedAt: new Date().toISOString() },
   ],
+  tripArchive: [],
 };
 
 let state = null;
 let editingShoppingId = null;
 let shoppingCategoryFilter = "הכל";
+let wishCategoryFilter = "הכל";
+let calendarViewDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let expandedTaskIds = new Set();
+let archivedTripSelection = new Set();
+let taskDragState = null;
+let suppressTaskClickUntil = 0;
 let supabaseClient = null;
 let currentUser = null;
 let realtimeChannel = null;
@@ -101,23 +111,45 @@ function cloneDefaultState() {
   return JSON.parse(JSON.stringify(defaultState));
 }
 
+function validStoredId(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{6,}$/.test(value);
+}
+
+function ensureCollectionIds(items) {
+  const seen = new Set();
+  items.forEach((item) => {
+    if (!validStoredId(item.id) || seen.has(item.id)) item.id = crypto.randomUUID();
+    seen.add(item.id);
+  });
+}
+
+function normalizeCategoryList(defaults, stored, itemCategories) {
+  return [...new Set([
+    ...defaults,
+    ...(Array.isArray(stored) ? stored : []),
+    ...itemCategories,
+  ].map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
 function normalizeState(input) {
   try {
     const loaded = input ? JSON.parse(JSON.stringify(input)) : cloneDefaultState();
 
     loaded.shopping = Array.isArray(loaded.shopping) ? loaded.shopping : [];
+    ensureCollectionIds(loaded.shopping);
     loaded.shopping.forEach((item) => {
       item.quantity = positiveInteger(item.quantity);
       if (item.category === "תינוקות" || item.category === "טיפוח") item.category = "פארם";
       item.category = item.category || "אחר";
+      item.purchased = Boolean(item.purchased);
       delete item.unitPrice;
       delete item.note;
     });
-    loaded.shoppingCategories = [...new Set([
-      ...SHOPPING_DEFAULT_CATEGORIES,
-      ...(Array.isArray(loaded.shoppingCategories) ? loaded.shoppingCategories : []),
-      ...loaded.shopping.map((item) => item.category)
-    ].filter(Boolean))].sort((a, b) => collator.compare(a, b));
+    loaded.shoppingCategories = normalizeCategoryList(
+      SHOPPING_DEFAULT_CATEGORIES,
+      loaded.shoppingCategories,
+      loaded.shopping.map((item) => item.category)
+    ).sort((a, b) => collator.compare(a, b));
 
     loaded.memberEmails = {
       iris: loaded.memberEmails?.iris || "",
@@ -126,6 +158,7 @@ function normalizeState(input) {
 
     const oldContacts = Array.isArray(loaded.contacts) ? loaded.contacts : [];
     loaded.events = Array.isArray(loaded.events) ? loaded.events : [];
+    ensureCollectionIds(loaded.events);
     loaded.events.forEach((event) => {
       if (!Array.isArray(event.participants)) {
         const participantNames = (event.participantIds || [])
@@ -146,34 +179,69 @@ function normalizeState(input) {
     });
 
     loaded.tasks = Array.isArray(loaded.tasks) ? loaded.tasks : [];
-    loaded.tasks.forEach((task) => {
+    ensureCollectionIds(loaded.tasks);
+    loaded.tasks.forEach((task, index) => {
+      task.title = String(task.title || task.name || "").trim();
+      task.notes = String(task.notes || task.description || "").trim();
       task.assignee = task.assignee === "אמא" ? "איריס"
         : task.assignee === "אבא" ? "תומר"
         : task.assignee === "שנינו" ? "איריס ותומר"
         : TASK_ASSIGNEES.includes(task.assignee) ? task.assignee
         : "איריס";
+      task.category = String(task.category || "אחר").trim() || "אחר";
+      task.completed = Boolean(task.completed);
+      task.order = Number.isFinite(Number(task.order)) ? Number(task.order) : index;
       delete task.dueDate;
+      delete task.priority;
+      delete task.recurring;
+      delete task.description;
+      delete task.name;
     });
+    loaded.tasks.sort((a, b) => a.order - b.order).forEach((task, index) => { task.order = index; });
 
     loaded.wishes = Array.isArray(loaded.wishes) ? loaded.wishes : [];
+    ensureCollectionIds(loaded.wishes);
     loaded.wishes.forEach((wish) => {
-      wish.group = WISH_GROUPS.includes(wish.group) ? wish.group
-        : WISH_GROUPS.includes(wish.type) ? wish.type
-        : "בית";
+      wish.title = String(wish.title || "").trim();
+      wish.category = String(wish.category || wish.group || wish.type || "בית").trim() || "בית";
+      wish.note = String(wish.note || wish.description || "").trim();
       wish.references = Array.isArray(wish.references)
-        ? wish.references.filter(Boolean)
-        : wish.link ? [wish.link] : [];
+        ? wish.references.map((reference) => String(reference || "").trim()).filter(Boolean)
+        : wish.link ? [String(wish.link).trim()] : [];
+      delete wish.group;
+      delete wish.description;
       delete wish.estimatedPrice;
       delete wish.type;
       delete wish.link;
+      delete wish.priority;
+      delete wish.status;
     });
+    loaded.wishCategories = normalizeCategoryList(
+      WISH_DEFAULT_CATEGORIES,
+      loaded.wishCategories,
+      loaded.wishes.map((wish) => wish.category)
+    );
 
     loaded.tripItems = Array.isArray(loaded.tripItems) ? loaded.tripItems : cloneDefaultState().tripItems;
-    loaded.tripItems.forEach((item) => {
-      item.category = TRIP_CATEGORIES.includes(item.category) ? item.category : "ציוד";
+    loaded.tripArchive = Array.isArray(loaded.tripArchive) ? loaded.tripArchive : [];
+    ensureCollectionIds(loaded.tripItems);
+    ensureCollectionIds(loaded.tripArchive);
+    const activeIds = new Set(loaded.tripItems.map((item) => item.id));
+    loaded.tripArchive.forEach((item) => {
+      if (activeIds.has(item.id)) item.id = crypto.randomUUID();
+      activeIds.add(item.id);
+    });
+    [...loaded.tripItems, ...loaded.tripArchive].forEach((item) => {
+      item.name = String(item.name || "").trim();
+      item.category = String(item.category || "ציוד").trim() || "ציוד";
       item.quantity = positiveInteger(item.quantity);
       item.packed = Boolean(item.packed);
     });
+    loaded.tripCategories = normalizeCategoryList(
+      TRIP_DEFAULT_CATEGORIES,
+      loaded.tripCategories,
+      [...loaded.tripItems, ...loaded.tripArchive].map((item) => item.category)
+    );
 
     delete loaded.contacts;
     return loaded;
@@ -182,6 +250,7 @@ function normalizeState(input) {
     return cloneDefaultState();
   }
 }
+
 
 function loadLocalState() {
   try {
@@ -464,8 +533,10 @@ function render() {
   renderNavigation();
   const item = NAV_ITEMS.find((navItem) => navItem.id === currentScreen) || NAV_ITEMS[0];
   screenTitle.textContent = item.label;
-  screenEyebrow.textContent = currentScreen === "home" ? "ניהול הבית · משפחת זילכה" : "משפחת זילכה";
-  quickAdd.hidden = currentScreen === "shopping";
+  const showEyebrow = currentScreen === "home";
+  screenEyebrow.hidden = !showEyebrow;
+  screenEyebrow.textContent = showEyebrow ? "ניהול הבית · משפחת זילכה" : "";
+  quickAdd.hidden = currentScreen === "shopping" || currentScreen === "events";
   quickAdd.textContent = currentScreen === "home" ? "＋ הוספה מהירה" : `＋ ${addLabel(currentScreen)}`;
   quickAdd.onclick = () => currentScreen === "home" ? openQuickAdd() : openAddDialog(currentScreen);
 
@@ -481,6 +552,7 @@ function render() {
   attachScreenEvents();
 }
 
+
 function addLabel(screen) {
   return ({ shopping: "מוצר", events: "אירוע", tasks: "סידור", wishes: "תכנון", trip: "פריט ציוד" })[screen] || "פריט";
 }
@@ -493,106 +565,163 @@ function upcomingEvents() {
     .sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
 }
 
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function hebrewDateParts(date) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-u-ca-hebrew", { day: "numeric", month: "long", year: "numeric" }).formatToParts(date);
+    return {
+      day: Number(parts.find((part) => part.type === "day")?.value),
+      month: parts.find((part) => part.type === "month")?.value || "",
+      year: Number(parts.find((part) => part.type === "year")?.value),
+    };
+  } catch (error) {
+    console.warn("Hebrew calendar is unavailable", error);
+    return null;
+  }
+}
+
+function isObservedIndependenceDay(date, hebrew) {
+  if (!hebrew || hebrew.month !== "Iyar") return false;
+  const weekday = date.getDay();
+  if (hebrew.day === 3 && weekday === 4) return true;
+  if (hebrew.day === 4 && weekday === 4) return true;
+  if (hebrew.day === 5 && weekday === 3) return true;
+  if (hebrew.day === 6 && weekday === 2) return true;
+  return false;
+}
+
+function israelHolidayForDate(date) {
+  const hebrew = hebrewDateParts(date);
+  if (!hebrew) return null;
+  const key = `${hebrew.month}-${hebrew.day}`;
+  const holidays = {
+    "Tishri-1": "ראש השנה",
+    "Tishri-2": "ראש השנה",
+    "Tishri-10": "יום כיפור",
+    "Tishri-15": "סוכות",
+    "Tishri-22": "שמחת תורה",
+    "Nisan-15": "פסח",
+    "Nisan-21": "שביעי של פסח",
+    "Sivan-6": "שבועות",
+  };
+  const title = holidays[key] || (isObservedIndependenceDay(date, hebrew) ? "יום העצמאות" : "");
+  if (!title) return null;
+  return {
+    id: `holiday-${dateKey(date)}`,
+    title,
+    date: dateKey(date),
+    allDay: true,
+    startTime: "",
+    endTime: "",
+    location: "",
+    notes: "חג / יום חופש",
+    participants: [],
+    isHoliday: true,
+  };
+}
+
+function calendarEntriesForDate(key) {
+  const date = new Date(`${key}T12:00:00`);
+  const holiday = israelHolidayForDate(date);
+  const events = state.events
+    .filter((event) => event.date === key)
+    .sort((a, b) => `${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
+  return holiday ? [holiday, ...events] : events;
+}
+
 function renderHome() {
-  const activeTasks = state.tasks.filter((task) => !task.completed).sort(sortTasks);
-  const events = upcomingEvents();
-  const now = new Date();
-  const monthTitle = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(now);
+  const activeShopping = state.shopping
+    .filter((item) => !item.purchased)
+    .sort((a, b) => collator.compare(a.category || "אחר", b.category || "אחר") || collator.compare(a.name, b.name));
+  const year = calendarViewDate.getFullYear();
+  const month = calendarViewDate.getMonth();
+  const monthTitle = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(calendarViewDate);
   return `
     <section class="card home-calendar-card">
-      <div class="card-title-row"><h3 class="card-title">לוח שנה</h3><span class="muted small">${monthTitle}</span></div>
-      ${calendarHtml(now.getFullYear(), now.getMonth())}
+      <div class="calendar-toolbar">
+        <button type="button" class="calendar-nav-button" data-calendar-next aria-label="החודש הבא">‹</button>
+        <div><h3 class="card-title">לוח שנה</h3><strong class="calendar-month-title">${escapeHtml(monthTitle)}</strong></div>
+        <button type="button" class="calendar-nav-button" data-calendar-prev aria-label="החודש הקודם">›</button>
+      </div>
+      ${calendarHtml(year, month)}
     </section>
-    <section class="grid home-list-grid">
-      <article class="card">
-        <div class="card-title-row"><h3 class="card-title">סידורים</h3><button class="link-button" data-nav="tasks">הצג הכל</button></div>
-        <div class="list">${activeTasks.slice(0, 6).map(taskItemHtml).join("") || emptyHtml("אין סידורים לביצוע")}</div>
-      </article>
-      <article class="card">
-        <div class="card-title-row"><h3 class="card-title">אירועים קרובים</h3><button class="link-button" data-nav="events">הצג הכל</button></div>
-        <div class="list">${events.slice(0, 6).map(eventItemHtml).join("") || emptyHtml("אין אירועים קרובים")}</div>
-      </article>
+    <section class="card home-shopping-card">
+      <div class="card-title-row"><h3 class="card-title">רשימת הקניות הפעילה</h3><button class="link-button" data-nav="shopping">לכל רשימת הקניות</button></div>
+      <div class="home-shopping-list">${activeShopping.map(homeShoppingItemHtml).join("") || emptyHtml("רשימת הקניות ריקה")}</div>
     </section>`;
 }
 
-function taskItemHtml(task) {
-  return `<div class="list-item">
-    <button class="checkbox ${task.completed ? "checked" : ""}" data-task-toggle="${task.id}" aria-label="שינוי סטטוס">${task.completed ? "✓" : ""}</button>
-    <div class="list-main"><div class="list-title ${task.completed ? "strike" : ""}">${escapeHtml(task.title)}</div>
-    <div class="list-meta">${escapeHtml(task.assignee)} · ${escapeHtml(task.category)} · ${escapeHtml(task.priority)}</div></div>
-  </div>`;
-}
-
-function eventItemHtml(event) {
-  const eventDate = new Date(`${event.date}T12:00:00`);
-  const when = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
-  return `<div class="list-item">
-    <div class="event-date"><div>${eventDate.getDate()}<span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(eventDate)}</span></div></div>
-    <div class="list-main"><div class="list-title">${escapeHtml(event.title)}</div>
-    <div class="list-meta">${when}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</div></div>
+function homeShoppingItemHtml(item) {
+  return `<div class="home-shopping-row">
+    <button class="checkbox" data-shopping-toggle="${item.id}" aria-label="סימון ${escapeHtml(item.name)} כנרכש"></button>
+    <div class="home-shopping-name"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category || "אחר")}</small></div>
+    <span class="home-shopping-quantity">${positiveInteger(item.quantity)}</span>
   </div>`;
 }
 
 function calendarHtml(year, monthIndex) {
-  const first = new Date(year, monthIndex, 1);
-  const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const monthEvents = state.events
-    .filter((event) => {
-      const date = new Date(`${event.date}T12:00:00`);
-      return date.getFullYear() === year && date.getMonth() === monthIndex;
-    })
-    .sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
-
-  const eventsByDay = new Map();
-  monthEvents.forEach((event) => {
-    const day = new Date(`${event.date}T12:00:00`).getDate();
-    if (!eventsByDay.has(day)) eventsByDay.set(day, []);
-    eventsByDay.get(day).push(event);
-  });
-
+  const first = new Date(year, monthIndex, 1, 12);
+  const daysInMonth = new Date(year, monthIndex + 1, 0, 12).getDate();
   const cells = ["א", "ב", "ג", "ד", "ה", "ו", "ש"].map((day) => `<div class="calendar-day head">${day}</div>`);
   for (let index = 0; index < first.getDay(); index += 1) cells.push(`<div class="calendar-day empty" aria-hidden="true"></div>`);
 
   const now = new Date();
   for (let day = 1; day <= daysInMonth; day += 1) {
-    const today = now.getFullYear() === year && now.getMonth() === monthIndex && now.getDate() === day;
-    const dayEvents = eventsByDay.get(day) || [];
+    const currentDate = new Date(year, monthIndex, day, 12);
+    const key = dateKey(currentDate);
+    const today = dateKey(now) === key;
+    const dayEvents = calendarEntriesForDate(key);
     const visibleEvents = dayEvents.slice(0, 2);
     const eventRows = visibleEvents.map((event, index) => {
       const time = event.allDay ? "" : (event.startTime || "");
       const label = `${time ? `${time} ` : ""}${event.title}`;
-      return `<button type="button" class="calendar-event-chip calendar-event-${index + 1}" data-nav="events" title="${escapeHtml(label)}"><span>${escapeHtml(label)}</span></button>`;
+      return `<span class="calendar-event-chip calendar-event-${index + 1} ${event.isHoliday ? "holiday" : ""}" title="${escapeHtml(label)}"><span>${escapeHtml(label)}</span></span>`;
     }).join("");
-    const more = dayEvents.length > 2
-      ? `<button type="button" class="calendar-more-events" data-nav="events">ועוד ${dayEvents.length - 2}</button>`
+    const desktopMore = dayEvents.length > 2
+      ? `<span class="calendar-more-events calendar-more-desktop">+${dayEvents.length - 2} נוספים</span>`
+      : "";
+    const mobileMore = dayEvents.length > 1
+      ? `<span class="calendar-more-events calendar-more-mobile">+${dayEvents.length - 1} נוספים</span>`
       : "";
 
-    cells.push(`<div class="calendar-day ${today ? "today" : ""} ${dayEvents.length ? "has-events" : ""}">
+    cells.push(`<div class="calendar-day ${today ? "today" : ""} ${dayEvents.length ? "has-events" : ""}" data-calendar-day="${key}" role="button" tabindex="0" aria-label="${day} ${escapeHtml(new Intl.DateTimeFormat("he-IL", { month: "long" }).format(currentDate))}${dayEvents.length ? `, ${dayEvents.length} אירועים` : ""}">
       <div class="calendar-day-number">${day}</div>
-      <div class="calendar-day-events">${eventRows}${more}</div>
+      <div class="calendar-day-events">${eventRows}${desktopMore}${mobileMore}</div>
     </div>`);
   }
 
-  const mobileAgenda = monthEvents.length
-    ? `<div class="calendar-mobile-agenda">
-        <div class="calendar-agenda-title">אירועים החודש</div>
-        ${monthEvents.slice(0, 8).map((event) => {
-          const date = new Date(`${event.date}T12:00:00`);
-          const dateLabel = new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short" }).format(date);
-          const when = event.allDay ? "כל היום" : (event.startTime || "");
-          return `<button type="button" class="calendar-agenda-row" data-nav="events">
-            <span class="calendar-agenda-date">${escapeHtml(dateLabel)}</span>
-            <span class="calendar-agenda-name">${escapeHtml(event.title)}</span>
-            <span class="calendar-agenda-time">${escapeHtml(when)}</span>
-          </button>`;
-        }).join("")}
-        ${monthEvents.length > 8 ? `<button type="button" class="calendar-agenda-more" data-nav="events">הצגת כל האירועים</button>` : ""}
-      </div>`
-    : "";
-
-  return `<div class="calendar">${cells.join("")}</div>${mobileAgenda}`;
+  return `<div class="calendar">${cells.join("")}</div>`;
 }
 
+function changeCalendarMonth(delta) {
+  calendarViewDate = new Date(calendarViewDate.getFullYear(), calendarViewDate.getMonth() + delta, 1);
+  render();
+}
+
+function openCalendarDay(key) {
+  const date = new Date(`${key}T12:00:00`);
+  const entries = calendarEntriesForDate(key);
+  dialogEyebrow.textContent = new Intl.DateTimeFormat("he-IL", { weekday: "long" }).format(date);
+  dialogTitle.textContent = new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "long", year: "numeric" }).format(date);
+  dialogSubmit.hidden = true;
+  dialogForm.onsubmit = null;
+  dialogBody.innerHTML = entries.length
+    ? `<div class="calendar-day-dialog-list">${entries.map((event) => {
+        const when = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
+        return `<article class="calendar-day-dialog-event ${event.isHoliday ? "holiday" : ""}"><div><strong>${escapeHtml(event.title)}</strong><span>${when}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</span></div>${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}</article>`;
+      }).join("")}</div>`
+    : emptyHtml("אין אירועים ביום זה");
+  if (entries.some((entry) => !entry.isHoliday)) {
+    dialogBody.insertAdjacentHTML("beforeend", `<button type="button" class="secondary-button day-events-button" data-day-go-events>לכל האירועים</button>`);
+    dialogBody.querySelector("[data-day-go-events]")?.addEventListener("click", () => { dialog.close(); navigate("events"); });
+  }
+  dialog.showModal();
+}
+
+/* Shopping */
 /* Shopping */
 function renderShopping() {
   const allActive = state.shopping.filter((item) => !item.purchased);
@@ -800,10 +929,12 @@ function filterShoppingRows() {
 /* Events */
 function renderEvents() {
   const events = [...state.events].sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
-  return `<section class="card events-card clean-list-card">
-    <div class="section-intro"><h3 class="card-title">האירועים שלנו</h3><p class="muted small">אירועים של איריס ותומר, כולל אירועים לכל היום</p></div>
-    <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span>משתתפים</span><span></span></div>
-    <div class="compact-event-list">${events.map(eventFullHtml).join("") || emptyHtml("אין אירועים")}</div>
+  return `<section class="events-page">
+    <div class="page-inline-actions"><button class="primary-button" type="button" data-add="events">＋ אירוע</button></div>
+    <section class="card events-card clean-list-card">
+      <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span>זמן ומיקום</span><span>משתתפים</span><span></span></div>
+      <div class="compact-event-list">${events.map(eventFullHtml).join("") || emptyHtml("אין אירועים")}</div>
+    </section>
   </section>`;
 }
 
@@ -823,100 +954,219 @@ function eventFullHtml(event) {
 /* Tasks */
 function renderTasks() {
   const active = state.tasks.filter((task) => !task.completed).sort(sortTasks);
-  const completed = state.tasks.filter((task) => task.completed).sort((a, b) => (b.completedAt || "").localeCompare(a.completedAt || ""));
+  const completed = state.tasks.filter((task) => task.completed).sort(sortTasks);
   return `<section class="task-page">
-    <div class="section-intro"><h3 class="card-title">סידורים לביצוע</h3><p class="muted small">מחולקים לפי איריס, תומר וסידורים משותפים</p></div>
-    <div class="task-assignee-grid">${TASK_ASSIGNEES.map((assignee) => taskAssigneeSectionHtml(assignee, active.filter((task) => task.assignee === assignee), false)).join("")}</div>
+    <section class="card task-list-card">
+      <div class="task-simple-list" data-task-list="active">${active.map((task) => taskCompactHtml(task, false)).join("") || emptyHtml("אין סידורים לביצוע")}</div>
+    </section>
     <details class="completed-section">
       <summary>סידורים שבוצעו <span class="count-pill completed">${completed.length}</span></summary>
-      <div class="task-assignee-grid completed-task-grid">${TASK_ASSIGNEES.map((assignee) => taskAssigneeSectionHtml(assignee, completed.filter((task) => task.assignee === assignee), true)).join("")}</div>
+      <section class="card task-list-card completed-card"><div class="task-simple-list" data-task-list="completed">${completed.map((task) => taskCompactHtml(task, true)).join("") || emptyHtml("אין סידורים שבוצעו")}</div></section>
     </details>
   </section>`;
 }
 
 function sortTasks(a, b) {
-  const order = { גבוהה: 0, בינונית: 1, נמוכה: 2 };
-  return (order[a.priority] ?? 9) - (order[b.priority] ?? 9) || collator.compare(a.title, b.title);
-}
-
-function taskAssigneeSectionHtml(assignee, tasks, completed) {
-  const heading = assignee === "איריס ותומר" ? "סידורים משותפים" : `הסידורים של ${assignee}`;
-  const icon = assignee === "איריס" ? "א" : assignee === "תומר" ? "ת" : "יחד";
-  return `<article class="card task-assignee-card ${completed ? "completed-card" : ""}">
-    <div class="task-assignee-header"><span class="assignee-avatar">${icon}</span><div><h4>${heading}</h4><span class="muted small">${tasks.length} סידורים</span></div></div>
-    <div class="task-compact-list">${tasks.map((task) => taskCompactHtml(task, completed)).join("") || emptyHtml(completed ? "אין סידורים שבוצעו" : "אין סידורים לביצוע")}</div>
-  </article>`;
+  return Number(a.order || 0) - Number(b.order || 0) || collator.compare(a.title, b.title);
 }
 
 function taskCompactHtml(task, completed) {
-  return `<div class="task-compact-row">
-    <button class="checkbox ${completed ? "checked" : ""}" data-task-toggle="${task.id}">${completed ? "✓" : ""}</button>
-    <div class="list-main"><div class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</div><div class="list-meta">${completed ? "בוצע" : `${escapeHtml(task.category)} · ${escapeHtml(task.priority)}`}${task.notes ? ` · ${escapeHtml(task.notes)}` : ""}</div></div>
+  const expanded = expandedTaskIds.has(task.id) && Boolean(task.notes);
+  return `<article class="task-compact-row task-draggable-row ${expanded ? "expanded" : ""}" data-task-id="${task.id}" data-task-completed="${completed}" draggable="true">
+    <button class="checkbox ${completed ? "checked" : ""}" data-task-toggle="${task.id}" aria-label="${completed ? "החזרה לביצוע" : "סימון כהושלם"}">${completed ? "✓" : ""}</button>
+    <button type="button" class="task-title-button" ${task.notes ? `data-task-expand="${task.id}" aria-expanded="${expanded}"` : "disabled"}>
+      <span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span>${task.notes ? `<span class="task-expand-icon">⌄</span>` : ""}
+    </button>
+    <button type="button" class="task-drag-handle" data-task-drag-handle="${task.id}" aria-label="גרירת הסידור לשינוי סדר" title="גרירה לשינוי סדר">⋮⋮</button>
     ${moreMenuHtml(`<button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button>`)}
-  </div>`;
+    ${task.notes ? `<div class="task-description" ${expanded ? "" : "hidden"}>${escapeHtml(task.notes)}</div>` : ""}
+  </article>`;
+}
+
+function toggleTaskDescription(id) {
+  if (Date.now() < suppressTaskClickUntil) return;
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task?.notes) return;
+  if (expandedTaskIds.has(id)) expandedTaskIds.delete(id);
+  else expandedTaskIds.add(id);
+  render();
 }
 
 /* Wishes */
+function wishCategories() {
+  return normalizeCategoryList(WISH_DEFAULT_CATEGORIES, state.wishCategories, state.wishes.map((wish) => wish.category));
+}
+
+function wishCategoryOptions(selected = "") {
+  return wishCategories().map((category) => `<option value="${escapeHtml(category)}" ${category === selected ? "selected" : ""}>${escapeHtml(category)}</option>`).join("");
+}
+
 function renderWishes() {
-  return `<section>
-    <div class="section-intro"><h3 class="card-title">התכנונים שלנו</h3><p class="muted small">מחולקים לבית, ילדים, תומר ואיריס</p></div>
-    <div class="wish-group-grid">${WISH_GROUPS.map((group) => wishGroupHtml(group)).join("")}</div>
+  const categories = wishCategories();
+  if (wishCategoryFilter !== "הכל" && !categories.includes(wishCategoryFilter)) wishCategoryFilter = "הכל";
+  const visibleCategories = wishCategoryFilter === "הכל" ? categories : [wishCategoryFilter];
+  return `<section class="planning-page">
+    <div class="category-toolbar">
+      <label class="category-filter-label">סינון<select data-wish-filter><option value="הכל">הכל</option>${categories.map((category) => `<option value="${escapeHtml(category)}" ${wishCategoryFilter === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
+      <button type="button" class="secondary-button compact-button" data-add-wish-category>＋ קטגוריה</button>
+      <label class="category-manager-label">ניהול<select data-wish-category-manager>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("")}</select></label>
+      <button type="button" class="secondary-button compact-button" data-rename-wish-category>שינוי שם</button>
+      <button type="button" class="danger-button compact-button" data-delete-wish-category>מחיקה</button>
+    </div>
+    <div class="wish-group-grid">${visibleCategories.map(wishGroupHtml).join("")}</div>
   </section>`;
 }
 
-function wishGroupHtml(group) {
-  const wishes = state.wishes.filter((wish) => wish.group === group).sort((a, b) => collator.compare(a.title, b.title));
-  const icon = { בית: "⌂", ילדים: "🧸", תומר: "ת", איריס: "א" }[group];
-  return `<section class="card wish-group-card"><div class="wish-group-header"><span class="assignee-avatar">${icon}</span><div><h3>${group}</h3><span class="muted small">${wishes.length} תכנונים</span></div></div><div class="wish-list">${wishes.map(wishHtml).join("") || emptyHtml("אין תכנונים עדיין")}</div></section>`;
+function wishGroupHtml(category) {
+  const wishes = state.wishes.filter((wish) => wish.category === category).sort((a, b) => collator.compare(a.title, b.title));
+  return `<section class="card wish-group-card"><div class="wish-group-header"><h3>${escapeHtml(category)}</h3><span class="muted small">${wishes.length} תכנונים</span></div><div class="wish-list">${wishes.map(wishHtml).join("") || emptyHtml("אין תכנונים בקטגוריה")}</div></section>`;
 }
 
 function wishHtml(wish) {
   const references = Array.isArray(wish.references) ? wish.references : [];
   return `<article class="wish-row">
-    <div class="wish-main"><div class="row-wrap"><strong>${escapeHtml(wish.title)}</strong>${priorityBadge(wish.priority)}<span class="badge purple">${escapeHtml(wish.status)}</span></div>${wish.description ? `<div class="list-meta">${escapeHtml(wish.description)}</div>` : ""}
-      ${references.length ? `<div class="reference-list">${references.map(referenceHtml).join("")}</div>` : ""}
+    <div class="wish-main"><strong>${escapeHtml(wish.title)}</strong>${wish.note ? `<div class="list-meta">${escapeHtml(wish.note)}</div>` : ""}
+      ${references.length ? `<div class="reference-list">${references.map(referenceHtml).join("")}</div>` : `<div class="list-meta">לא נוספו קישורים</div>`}
     </div>
     ${moreMenuHtml(`<button type="button" data-edit-wish="${wish.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-wish="${wish.id}">מחיקה</button>`)}
   </article>`;
 }
 
 function referenceHtml(reference, index) {
-  const isUrl = /^https?:\/\//i.test(reference);
-  return isUrl
-    ? `<a class="reference-chip" href="${escapeHtml(reference)}" target="_blank" rel="noopener">רפרנס ${index + 1}</a>`
-    : `<span class="reference-chip">${escapeHtml(reference)}</span>`;
+  return `<a class="reference-chip" href="${escapeHtml(reference)}" target="_blank" rel="noopener">קישור ${index + 1}</a>`;
+}
+
+function addWishCategory() {
+  const category = String(window.prompt("שם הקטגוריה החדשה:") || "").trim();
+  if (!category) return;
+  if (wishCategories().some((existing) => normalizeName(existing) === normalizeName(category))) return showToast("הקטגוריה כבר קיימת");
+  state.wishCategories = [...wishCategories(), category];
+  wishCategoryFilter = category;
+  saveState("הקטגוריה נוספה");
+  render();
+}
+
+function selectedWishManageCategory() {
+  return document.querySelector("[data-wish-category-manager]")?.value || "";
+}
+
+function renameWishCategory() {
+  const oldName = selectedWishManageCategory();
+  if (!oldName) return;
+  const newName = String(window.prompt("השם החדש לקטגוריה:", oldName) || "").trim();
+  if (!newName || newName === oldName) return;
+  if (wishCategories().some((category) => category !== oldName && normalizeName(category) === normalizeName(newName))) return showToast("הקטגוריה כבר קיימת");
+  state.wishCategories = wishCategories().map((category) => category === oldName ? newName : category);
+  state.wishes.forEach((wish) => { if (wish.category === oldName) wish.category = newName; });
+  if (wishCategoryFilter === oldName) wishCategoryFilter = newName;
+  saveState("שם הקטגוריה עודכן");
+  render();
+}
+
+function deleteWishCategory() {
+  const category = selectedWishManageCategory();
+  if (!category) return;
+  if (state.wishes.some((wish) => wish.category === category)) return showToast("אפשר למחוק רק קטגוריה ריקה");
+  if (!confirm(`למחוק את הקטגוריה „${category}”?`)) return;
+  state.wishCategories = wishCategories().filter((item) => item !== category);
+  if (wishCategoryFilter === category) wishCategoryFilter = "הכל";
+  saveState("הקטגוריה נמחקה");
+  render();
 }
 
 /* Trip packing */
+function tripCategories() {
+  return normalizeCategoryList(TRIP_DEFAULT_CATEGORIES, state.tripCategories, [...state.tripItems, ...state.tripArchive].map((item) => item.category));
+}
+
+function tripCategoryOptions(selected = "") {
+  return tripCategories().map((category) => `<option value="${escapeHtml(category)}" ${category === selected ? "selected" : ""}>${escapeHtml(category)}</option>`).join("");
+}
+
 function renderTrip() {
   const packed = state.tripItems.filter((item) => item.packed).length;
   const total = state.tripItems.length;
   const progress = total ? Math.round((packed / total) * 100) : 0;
-  const visibleCategories = TRIP_CATEGORIES.filter((category) => state.tripItems.some((item) => item.category === category));
-  return `<section class="card trip-list-card clean-list-card">
-    <div class="trip-list-head">
-      <div><h3 class="card-title">רשימת ציוד משותפת</h3><p class="muted small">${packed} מתוך ${total} פריטים ארוזים</p></div>
-      <div class="trip-head-actions"><strong class="progress-number">${progress}%</strong><button class="secondary-button compact-button" type="button" data-reset-trip>איפוס רשימה</button></div>
+  const categories = tripCategories();
+  const visibleCategories = categories.filter((category) => state.tripItems.some((item) => item.category === category));
+  return `<section class="trip-page">
+    <div class="category-toolbar trip-category-toolbar">
+      <button type="button" class="secondary-button compact-button" data-add-trip-category>＋ קטגוריה</button>
+      <label class="category-manager-label">ניהול<select data-trip-category-manager>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("")}</select></label>
+      <button type="button" class="secondary-button compact-button" data-rename-trip-category>שינוי שם</button>
+      <button type="button" class="danger-button compact-button" data-delete-trip-category>מחיקה</button>
     </div>
-    <div class="progress-track"><span style="width:${progress}%"></span></div>
-    <div class="trip-category-list">${visibleCategories.map(tripCategoryHtml).join("") || emptyHtml("הרשימה ריקה. הוסיפו פריט ציוד כדי להתחיל.")}</div>
+    <section class="card trip-list-card clean-list-card">
+      <div class="trip-list-head"><span class="muted small">${packed} מתוך ${total} פריטים ארוזים</span><div class="trip-head-actions"><strong class="progress-number">${progress}%</strong><button class="secondary-button compact-button" type="button" data-reset-trip>איפוס רשימה</button></div></div>
+      <div class="progress-track"><span style="width:${progress}%"></span></div>
+      <div class="trip-category-list">${visibleCategories.map(tripCategoryHtml).join("") || emptyHtml("הרשימה הפעילה ריקה")}</div>
+    </section>
+    ${tripArchiveHtml()}
   </section>`;
 }
 
 function tripCategoryHtml(category) {
   const items = state.tripItems.filter((item) => item.category === category).sort((a, b) => Number(a.packed) - Number(b.packed) || collator.compare(a.name, b.name));
   if (!items.length) return "";
-  const icon = { אוכל: "🥪", רחצה: "🧴", תרופות: "💊", בגדים: "👕", ציוד: "🎒" }[category];
-  return `<section class="trip-category-section"><div class="trip-category-header"><span>${icon}</span><h3>${category}</h3><small>${items.length}</small></div><div class="trip-list">${items.map(tripItemHtml).join("")}</div></section>`;
+  const icon = { אוכל: "🥪", רחצה: "🧴", תרופות: "💊", בגדים: "👕", ציוד: "🎒" }[category] || "📦";
+  return `<section class="trip-category-section"><div class="trip-category-header"><span>${icon}</span><h3>${escapeHtml(category)}</h3><small>${items.length}</small></div><div class="trip-list">${items.map(tripItemHtml).join("")}</div></section>`;
 }
 
 function tripItemHtml(item) {
   return `<div class="trip-row">
-    <button class="checkbox ${item.packed ? "checked" : ""}" data-trip-toggle="${item.id}">${item.packed ? "✓" : ""}</button>
+    <button class="checkbox ${item.packed ? "checked" : ""}" data-trip-toggle="${item.id}" aria-label="${item.packed ? "סימון כלא ארוז" : "סימון כארוז"}">${item.packed ? "✓" : ""}</button>
     <div class="list-main"><div class="list-title ${item.packed ? "strike" : ""}">${escapeHtml(item.name)}</div></div>
     <div class="quantity-stepper always-visible"><button class="stepper-button" data-trip-quantity="${item.id}" data-delta="-1">−</button><strong>${positiveInteger(item.quantity)}</strong><button class="stepper-button" data-trip-quantity="${item.id}" data-delta="1">＋</button></div>
-    ${moreMenuHtml(`<button type="button" data-edit-trip="${item.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-trip="${item.id}">מחיקה</button>`)}
+    ${moreMenuHtml(`<button type="button" data-edit-trip="${item.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-trip="${item.id}">העברה לארכיון</button>`)}
   </div>`;
+}
+
+function tripArchiveHtml() {
+  const archive = [...state.tripArchive].sort((a, b) => (b.archivedAt || "").localeCompare(a.archivedAt || "") || collator.compare(a.name, b.name));
+  return `<details class="card trip-archive-card" ${archivedTripSelection.size ? "open" : ""}>
+    <summary>ארכיון <span class="count-pill completed">${archive.length}</span></summary>
+    <div class="archive-actions">
+      <button type="button" class="secondary-button compact-button" data-restore-selected-trip ${archivedTripSelection.size ? "" : "disabled"}>החזרת מסומנים</button>
+      <button type="button" class="secondary-button compact-button" data-restore-all-trip ${archive.length ? "" : "disabled"}>החזרת כל הפריטים</button>
+      <button type="button" class="danger-button compact-button" data-delete-archived-trip ${archivedTripSelection.size ? "" : "disabled"}>מחיקה לצמיתות</button>
+    </div>
+    <div class="trip-archive-list">${archive.map((item) => `<label class="trip-archive-row"><input type="checkbox" data-trip-archive-select="${item.id}" ${archivedTripSelection.has(item.id) ? "checked" : ""}/><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span></label>`).join("") || emptyHtml("הארכיון ריק")}</div>
+  </details>`;
+}
+
+function addTripCategory() {
+  const category = String(window.prompt("שם הקטגוריה החדשה:") || "").trim();
+  if (!category) return;
+  if (tripCategories().some((existing) => normalizeName(existing) === normalizeName(category))) return showToast("הקטגוריה כבר קיימת");
+  state.tripCategories = [...tripCategories(), category];
+  saveState("הקטגוריה נוספה");
+  render();
+}
+
+function selectedTripManageCategory() {
+  return document.querySelector("[data-trip-category-manager]")?.value || "";
+}
+
+function renameTripCategory() {
+  const oldName = selectedTripManageCategory();
+  if (!oldName) return;
+  const newName = String(window.prompt("השם החדש לקטגוריה:", oldName) || "").trim();
+  if (!newName || newName === oldName) return;
+  if (tripCategories().some((category) => category !== oldName && normalizeName(category) === normalizeName(newName))) return showToast("הקטגוריה כבר קיימת");
+  state.tripCategories = tripCategories().map((category) => category === oldName ? newName : category);
+  [...state.tripItems, ...state.tripArchive].forEach((item) => { if (item.category === oldName) item.category = newName; });
+  saveState("שם הקטגוריה עודכן");
+  render();
+}
+
+function deleteTripCategory() {
+  const category = selectedTripManageCategory();
+  if (!category) return;
+  if ([...state.tripItems, ...state.tripArchive].some((item) => item.category === category)) return showToast("אפשר למחוק רק קטגוריה ריקה");
+  if (!confirm(`למחוק את הקטגוריה „${category}”?`)) return;
+  state.tripCategories = tripCategories().filter((item) => item !== category);
+  saveState("הקטגוריה נמחקה");
+  render();
 }
 
 function emptyHtml(message) {
@@ -927,6 +1177,18 @@ function emptyHtml(message) {
 function attachScreenEvents() {
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.nav)));
   document.querySelectorAll("[data-add]").forEach((button) => button.addEventListener("click", () => openAddDialog(button.dataset.add)));
+
+  document.querySelector("[data-calendar-prev]")?.addEventListener("click", () => changeCalendarMonth(-1));
+  document.querySelector("[data-calendar-next]")?.addEventListener("click", () => changeCalendarMonth(1));
+  document.querySelectorAll("[data-calendar-day]").forEach((cell) => {
+    cell.addEventListener("click", () => openCalendarDay(cell.dataset.calendarDay));
+    cell.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openCalendarDay(cell.dataset.calendarDay);
+      }
+    });
+  });
 
   document.querySelectorAll("[data-shopping-toggle]").forEach((button) => button.addEventListener("click", () => toggleShopping(button.dataset.shoppingToggle)));
   document.querySelectorAll("[data-shopping-quantity]").forEach((button) => button.addEventListener("click", () => updateShoppingQuantity(button.dataset.shoppingQuantity, button.dataset.delta)));
@@ -950,18 +1212,36 @@ function attachScreenEvents() {
   document.querySelectorAll("[data-email-event]").forEach((button) => button.addEventListener("click", () => emailEvent(button.dataset.emailEvent)));
 
   document.querySelectorAll("[data-task-toggle]").forEach((button) => button.addEventListener("click", () => toggleTask(button.dataset.taskToggle)));
+  document.querySelectorAll("[data-task-expand]").forEach((button) => button.addEventListener("click", () => toggleTaskDescription(button.dataset.taskExpand)));
   document.querySelectorAll("[data-edit-task]").forEach((button) => button.addEventListener("click", () => openEditDialog("tasks", button.dataset.editTask)));
   document.querySelectorAll("[data-delete-task]").forEach((button) => button.addEventListener("click", () => deleteFrom("tasks", button.dataset.deleteTask)));
+  setupTaskDragHandles();
 
   document.querySelectorAll("[data-edit-wish]").forEach((button) => button.addEventListener("click", () => openEditDialog("wishes", button.dataset.editWish)));
   document.querySelectorAll("[data-delete-wish]").forEach((button) => button.addEventListener("click", () => deleteFrom("wishes", button.dataset.deleteWish)));
+  document.querySelector("[data-wish-filter]")?.addEventListener("change", (event) => { wishCategoryFilter = event.target.value; render(); });
+  document.querySelector("[data-add-wish-category]")?.addEventListener("click", addWishCategory);
+  document.querySelector("[data-rename-wish-category]")?.addEventListener("click", renameWishCategory);
+  document.querySelector("[data-delete-wish-category]")?.addEventListener("click", deleteWishCategory);
 
   document.querySelectorAll("[data-trip-toggle]").forEach((button) => button.addEventListener("click", () => toggleTrip(button.dataset.tripToggle)));
   document.querySelectorAll("[data-trip-quantity]").forEach((button) => button.addEventListener("click", () => updateTripQuantity(button.dataset.tripQuantity, button.dataset.delta)));
   document.querySelectorAll("[data-edit-trip]").forEach((button) => button.addEventListener("click", () => openEditDialog("trip", button.dataset.editTrip)));
-  document.querySelectorAll("[data-delete-trip]").forEach((button) => button.addEventListener("click", () => deleteFrom("tripItems", button.dataset.deleteTrip)));
+  document.querySelectorAll("[data-delete-trip]").forEach((button) => button.addEventListener("click", () => archiveTripItem(button.dataset.deleteTrip)));
   document.querySelector("[data-reset-trip]")?.addEventListener("click", resetTripList);
+  document.querySelector("[data-add-trip-category]")?.addEventListener("click", addTripCategory);
+  document.querySelector("[data-rename-trip-category]")?.addEventListener("click", renameTripCategory);
+  document.querySelector("[data-delete-trip-category]")?.addEventListener("click", deleteTripCategory);
+  document.querySelectorAll("[data-trip-archive-select]").forEach((checkbox) => checkbox.addEventListener("change", () => {
+    if (checkbox.checked) archivedTripSelection.add(checkbox.dataset.tripArchiveSelect);
+    else archivedTripSelection.delete(checkbox.dataset.tripArchiveSelect);
+    updateArchiveActionButtons();
+  }));
+  document.querySelector("[data-restore-selected-trip]")?.addEventListener("click", restoreSelectedTripItems);
+  document.querySelector("[data-restore-all-trip]")?.addEventListener("click", restoreAllTripItems);
+  document.querySelector("[data-delete-archived-trip]")?.addEventListener("click", permanentlyDeleteArchivedTripItems);
 }
+
 
 function toggleShopping(id) {
   const item = state.shopping.find((existing) => existing.id === id);
@@ -977,7 +1257,130 @@ function toggleTask(id) {
   if (!task) return;
   task.completed = !task.completed;
   task.completedAt = task.completed ? new Date().toISOString() : null;
+  expandedTaskIds.delete(id);
   saveState(task.completed ? "הסידור הועבר לסידורים שבוצעו" : "הסידור הוחזר לביצוע");
+  render();
+}
+
+function setupTaskDragHandles() {
+  document.querySelectorAll("[data-task-drag-handle]").forEach((handle) => {
+    const row = handle.closest("[data-task-id]");
+    handle.addEventListener("pointerdown", startTaskPointerDrag);
+    handle.addEventListener("mousedown", () => {
+      if (row) row.dataset.dragReady = "true";
+    });
+  });
+
+  document.querySelectorAll("[data-task-id]").forEach((row) => {
+    row.addEventListener("dragstart", (event) => {
+      if (row.dataset.dragReady !== "true") {
+        event.preventDefault();
+        return;
+      }
+      const list = row.closest("[data-task-list]");
+      if (!list) return;
+      taskDragState = { row, list, active: true, desktop: true };
+      row.classList.add("dragging");
+      document.body.classList.add("task-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", row.dataset.taskId || "");
+      suppressTaskClickUntil = Date.now() + 450;
+    });
+
+    row.addEventListener("dragover", (event) => {
+      const drag = taskDragState;
+      if (!drag?.desktop || !drag.active || drag.row === row || drag.list !== row.closest("[data-task-list]")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      const rect = row.getBoundingClientRect();
+      if (event.clientY < rect.top + rect.height / 2) drag.list.insertBefore(drag.row, row);
+      else drag.list.insertBefore(drag.row, row.nextSibling);
+    });
+
+    row.addEventListener("drop", (event) => {
+      if (!taskDragState?.desktop) return;
+      event.preventDefault();
+    });
+
+    row.addEventListener("dragend", () => {
+      if (!taskDragState?.desktop) return;
+      const draggedRow = taskDragState.row;
+      draggedRow.classList.remove("dragging");
+      draggedRow.removeAttribute("data-drag-ready");
+      document.body.classList.remove("task-dragging");
+      suppressTaskClickUntil = Date.now() + 450;
+      taskDragState = null;
+      persistTaskOrderFromDom();
+    });
+  });
+}
+
+function startTaskPointerDrag(event) {
+  if (event.pointerType === "mouse") return;
+  if (event.button !== undefined && event.button !== 0) return;
+  const handle = event.currentTarget;
+  const row = handle.closest("[data-task-id]");
+  const list = row?.closest("[data-task-list]");
+  if (!row || !list) return;
+  event.preventDefault();
+  const pointerId = event.pointerId;
+  const delay = event.pointerType === "mouse" ? 0 : 380;
+  const drag = { handle, row, list, pointerId, active: false, timer: null };
+  taskDragState = drag;
+  try { handle.setPointerCapture(pointerId); } catch (error) { /* no-op */ }
+
+  const activate = () => {
+    if (taskDragState !== drag) return;
+    drag.active = true;
+    row.classList.add("dragging");
+    document.body.classList.add("task-dragging");
+  };
+  if (delay === 0) activate();
+  else drag.timer = setTimeout(activate, delay);
+
+  const move = (moveEvent) => {
+    if (taskDragState !== drag || moveEvent.pointerId !== pointerId || !drag.active) return;
+    if (moveEvent.cancelable) moveEvent.preventDefault();
+
+    // Determine the insertion point from the vertical pointer position instead
+    // of relying on elementFromPoint. This stays reliable while the dragged row
+    // is under the finger and when pointer capture is active on mobile devices.
+    const candidates = [...list.querySelectorAll("[data-task-id]")].filter((candidate) => candidate !== row);
+    const insertBefore = candidates.find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return moveEvent.clientY < rect.top + rect.height / 2;
+    });
+    if (insertBefore) list.insertBefore(row, insertBefore);
+    else list.appendChild(row);
+  };
+
+  const finish = (endEvent) => {
+    if (endEvent.pointerId !== pointerId) return;
+    clearTimeout(drag.timer);
+    handle.removeEventListener("pointermove", move);
+    handle.removeEventListener("pointerup", finish);
+    handle.removeEventListener("pointercancel", finish);
+    try { handle.releasePointerCapture(pointerId); } catch (error) { /* no-op */ }
+    if (drag.active) {
+      row.classList.remove("dragging");
+      document.body.classList.remove("task-dragging");
+      suppressTaskClickUntil = Date.now() + 450;
+      persistTaskOrderFromDom();
+    }
+    if (taskDragState === drag) taskDragState = null;
+  };
+
+  handle.addEventListener("pointermove", move);
+  handle.addEventListener("pointerup", finish);
+  handle.addEventListener("pointercancel", finish);
+}
+
+function persistTaskOrderFromDom() {
+  const orderedIds = [...document.querySelectorAll("[data-task-list] [data-task-id]")].map((row) => row.dataset.taskId);
+  const orderMap = new Map(orderedIds.map((id, index) => [id, index]));
+  state.tasks.sort((a, b) => (orderMap.get(a.id) ?? 99999) - (orderMap.get(b.id) ?? 99999));
+  state.tasks.forEach((task, index) => { task.order = index; });
+  saveState("סדר הסידורים נשמר");
   render();
 }
 
@@ -990,11 +1393,31 @@ function toggleTrip(id) {
   render();
 }
 
+function archiveTripItem(id) {
+  const item = state.tripItems.find((existing) => existing.id === id);
+  if (!item) return;
+  if (!confirm(`להעביר את „${item.name}” לארכיון?`)) return;
+  state.tripItems = state.tripItems.filter((existing) => existing.id !== id);
+  state.tripArchive.push({ ...item, packed: false, packedAt: null, archivedAt: new Date().toISOString() });
+  saveState("הפריט הועבר לארכיון");
+  render();
+}
+
 function resetTripList() {
   if (!state.tripItems.length) return showToast("רשימת הטיול כבר ריקה");
-  if (!confirm("לאפס את רשימת הטיול ולמחוק את כל הפריטים?")) return;
+  if (!confirm("לאפס את הרשימה הפעילה ולהעביר את כל הפריטים לארכיון?")) return;
+  const archivedAt = new Date().toISOString();
+  const archiveBatchId = crypto.randomUUID();
+  state.tripArchive.push(...state.tripItems.map((item) => ({
+    ...item,
+    packed: false,
+    packedAt: null,
+    archivedAt,
+    archiveBatchId,
+  })));
   state.tripItems = [];
-  saveState("רשימת הטיול אופסה");
+  archivedTripSelection.clear();
+  saveState("הרשימה אופסה והפריטים הועברו לארכיון");
   render();
 }
 
@@ -1006,13 +1429,63 @@ function updateTripQuantity(id, delta) {
   render();
 }
 
+function restoreTripItems(ids) {
+  const idSet = new Set(ids);
+  const restored = state.tripArchive.filter((item) => idSet.has(item.id));
+  if (!restored.length) return;
+  const activeIds = new Set(state.tripItems.map((item) => item.id));
+  restored.forEach((item) => {
+    const restoredItem = { ...item, packed: false, packedAt: null };
+    delete restoredItem.archivedAt;
+    delete restoredItem.archiveBatchId;
+    if (activeIds.has(restoredItem.id)) restoredItem.id = crypto.randomUUID();
+    activeIds.add(restoredItem.id);
+    state.tripItems.push(restoredItem);
+    if (!state.tripCategories.includes(restoredItem.category)) state.tripCategories.push(restoredItem.category);
+  });
+  state.tripArchive = state.tripArchive.filter((item) => !idSet.has(item.id));
+  ids.forEach((id) => archivedTripSelection.delete(id));
+  saveState("הפריטים הוחזרו לרשימה הפעילה");
+  render();
+}
+
+function restoreSelectedTripItems() {
+  restoreTripItems([...archivedTripSelection]);
+}
+
+function restoreAllTripItems() {
+  if (!state.tripArchive.length) return;
+  restoreTripItems(state.tripArchive.map((item) => item.id));
+}
+
+function permanentlyDeleteArchivedTripItems() {
+  const ids = [...archivedTripSelection];
+  if (!ids.length) return;
+  if (!confirm(`למחוק לצמיתות ${ids.length} פריטים מהארכיון? לא ניתן לבטל פעולה זו.`)) return;
+  const idSet = new Set(ids);
+  state.tripArchive = state.tripArchive.filter((item) => !idSet.has(item.id));
+  archivedTripSelection.clear();
+  saveState("הפריטים נמחקו לצמיתות מהארכיון");
+  render();
+}
+
+function updateArchiveActionButtons() {
+  const hasSelection = archivedTripSelection.size > 0;
+  const restoreButton = document.querySelector("[data-restore-selected-trip]");
+  const deleteButton = document.querySelector("[data-delete-archived-trip]");
+  if (restoreButton) restoreButton.disabled = !hasSelection;
+  if (deleteButton) deleteButton.disabled = !hasSelection;
+}
+
 function deleteFrom(collection, id) {
   if (!confirm("למחוק את הפריט?")) return;
   state[collection] = state[collection].filter((item) => item.id !== id);
+  if (collection === "tasks") expandedTaskIds.delete(id);
   saveState("הפריט נמחק");
   render();
 }
 
+/* Dialogs */
 /* Dialogs */
 function openQuickAdd() {
   dialogEyebrow.textContent = "הוספה מהירה";
@@ -1077,7 +1550,7 @@ function dialogConfig(type, item) {
       submit: (data) => submitWish(data, item?.id),
     },
     trip: {
-      eyebrow: "התארגנות לטיול", title: editing ? "עריכת פריט ציוד" : "פריט ציוד חדש", html: tripFormHtml(item), submitLabel: editing ? "שמירת שינויים" : "שמירה",
+      eyebrow: "טיול", title: editing ? "עריכת פריט ציוד" : "פריט ציוד חדש", html: tripFormHtml(item), submitLabel: editing ? "שמירת שינויים" : "שמירה",
       submit: (data) => submitTripItem(data, item?.id),
     },
   };
@@ -1173,19 +1646,26 @@ function submitEvent(formData, id = null) {
 function taskFormHtml(item = null) {
   return `<div class="form-stack">
     <label>שם הסידור<input name="title" required autofocus value="${escapeHtml(item?.title || "")}" /></label>
-    <label>הערה<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
-    <div class="form-grid"><label>אחראי<select name="assignee">${TASK_ASSIGNEES.map((assignee) => `<option ${item?.assignee === assignee ? "selected" : ""}>${assignee}</option>`).join("")}</select></label><label>קטגוריה<select name="category">${["אוטו", "בית", "ילדים", "כספים", "בריאות", "עבודה", "אחר"].map((category) => `<option ${item?.category === category ? "selected" : ""}>${category}</option>`).join("")}</select></label></div>
-    <div class="form-grid"><label>עדיפות<select name="priority">${["גבוהה", "בינונית", "נמוכה"].map((priority) => `<option ${item?.priority === priority || (!item && priority === "בינונית") ? "selected" : ""}>${priority}</option>`).join("")}</select></label><label>חזרתיות<select name="recurring">${[["none", "ללא חזרה"], ["daily", "יומי"], ["weekly", "שבועי"], ["monthly", "חודשי"]].map(([value, label]) => `<option value="${value}" ${item?.recurring === value ? "selected" : ""}>${label}</option>`).join("")}</select></label></div>
+    <label>תיאור<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
+    <div class="form-grid"><label>שיוך<select name="assignee">${TASK_ASSIGNEES.map((assignee) => `<option ${item?.assignee === assignee ? "selected" : ""}>${assignee}</option>`).join("")}</select></label><label>קטגוריה<select name="category">${[...new Set([...TASK_CATEGORIES, item?.category].filter(Boolean))].map((category) => `<option ${item?.category === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label></div>
   </div>`;
 }
 
 function submitTask(formData, id = null) {
   const values = {
-    title: String(formData.get("title") || "").trim(), notes: String(formData.get("notes") || "").trim(), assignee: formData.get("assignee"),
-    priority: formData.get("priority"), category: formData.get("category"), recurring: formData.get("recurring"),
+    title: String(formData.get("title") || "").trim(),
+    notes: String(formData.get("notes") || "").trim(),
+    assignee: formData.get("assignee"),
+    category: formData.get("category") || "אחר",
   };
-  if (id) Object.assign(state.tasks.find((task) => task.id === id), values);
-  else state.tasks.push({ id: crypto.randomUUID(), ...values, completed: false, completedAt: null });
+  if (id) {
+    const task = state.tasks.find((existing) => existing.id === id);
+    if (!task) return;
+    Object.assign(task, values);
+  } else {
+    const nextOrder = state.tasks.reduce((max, task) => Math.max(max, Number(task.order || 0)), -1) + 1;
+    state.tasks.push({ id: crypto.randomUUID(), ...values, completed: false, completedAt: null, order: nextOrder });
+  }
   saveState(id ? "הסידור עודכן" : "הסידור נוסף");
   dialog.close();
   render();
@@ -1196,26 +1676,48 @@ function referencesToText(references = []) {
 }
 
 function parseReferences(value) {
-  return String(value || "").split(/\n+/).map((reference) => reference.trim()).filter(Boolean);
+  return String(value || "").split(/\n+/).map((reference) => reference.trim()).filter(Boolean).map((reference) => {
+    if (/^www\./i.test(reference)) return `https://${reference}`;
+    return reference;
+  });
+}
+
+function isValidWebLink(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch (error) {
+    return false;
+  }
 }
 
 function wishFormHtml(item = null) {
   return `<div class="form-stack">
     <label>שם התכנון<input name="title" required autofocus value="${escapeHtml(item?.title || "")}" /></label>
-    <label>תיאור<textarea name="description">${escapeHtml(item?.description || "")}</textarea></label>
-    <div class="form-grid"><label>שיוך<select name="group">${WISH_GROUPS.map((group) => `<option ${item?.group === group ? "selected" : ""}>${group}</option>`).join("")}</select></label><label>עדיפות<select name="priority">${["גבוהה", "בינונית", "נמוכה"].map((priority) => `<option ${item?.priority === priority || (!item && priority === "בינונית") ? "selected" : ""}>${priority}</option>`).join("")}</select></label></div>
-    <label>רפרנסים<textarea name="references" placeholder="קישור או תיאור, אחד בכל שורה">${escapeHtml(referencesToText(item?.references || []))}</textarea></label>
-    <label>סטטוס<select name="status">${["רעיון", "בבדיקה", "מתוכנן", "בוצע"].map((status) => `<option ${item?.status === status ? "selected" : ""}>${status}</option>`).join("")}</select></label>
+    <label>קטגוריה<select name="category">${wishCategoryOptions(item?.category || (wishCategoryFilter === "הכל" ? "בית" : wishCategoryFilter))}</select></label>
+    <label>קישורים<textarea name="references" required placeholder="קישור אחד בכל שורה">${escapeHtml(referencesToText(item?.references || []))}</textarea></label>
+    <label>הערה אופציונלית<textarea name="note">${escapeHtml(item?.note || "")}</textarea></label>
   </div>`;
 }
 
 function submitWish(formData, id = null) {
+  const references = parseReferences(formData.get("references"));
+  if (!references.length) return showToast("יש להוסיף לפחות קישור אחד");
+  if (references.some((reference) => !isValidWebLink(reference))) return showToast("יש להזין קישורים תקינים שמתחילים ב־https://");
   const values = {
-    title: String(formData.get("title") || "").trim(), description: String(formData.get("description") || "").trim(), group: formData.get("group"), priority: formData.get("priority"),
-    references: parseReferences(formData.get("references")), status: formData.get("status"),
+    title: String(formData.get("title") || "").trim(),
+    category: formData.get("category") || "בית",
+    references,
+    note: String(formData.get("note") || "").trim(),
   };
-  if (id) Object.assign(state.wishes.find((wish) => wish.id === id), values);
-  else state.wishes.push({ id: crypto.randomUUID(), ...values });
+  if (!state.wishCategories.includes(values.category)) state.wishCategories.push(values.category);
+  if (id) {
+    const wish = state.wishes.find((existing) => existing.id === id);
+    if (!wish) return;
+    Object.assign(wish, values);
+  } else {
+    state.wishes.push({ id: crypto.randomUUID(), ...values });
+  }
   saveState(id ? "התכנון עודכן" : "התכנון נוסף");
   dialog.close();
   render();
@@ -1224,15 +1726,21 @@ function submitWish(formData, id = null) {
 function tripFormHtml(item = null) {
   return `<div class="form-stack">
     <label>שם הפריט<input name="name" required autofocus value="${escapeHtml(item?.name || "")}" /></label>
-    <div class="form-grid"><label>קטגוריה<select name="category">${TRIP_CATEGORIES.map((category) => `<option ${item?.category === category ? "selected" : ""}>${category}</option>`).join("")}</select></label><label>כמות<input name="quantity" type="number" min="1" step="1" inputmode="numeric" value="${positiveInteger(item?.quantity)}" /></label></div>
+    <div class="form-grid"><label>קטגוריה<select name="category">${tripCategoryOptions(item?.category || "ציוד")}</select></label><label>כמות<input name="quantity" type="number" min="1" step="1" inputmode="numeric" value="${positiveInteger(item?.quantity)}" /></label></div>
     ${item ? `<label class="checkbox-label"><input name="packed" type="checkbox" ${item.packed ? "checked" : ""} /> הפריט ארוז</label>` : ""}
   </div>`;
 }
 
 function submitTripItem(formData, id = null) {
-  const values = { name: String(formData.get("name") || "").trim(), category: formData.get("category"), quantity: positiveInteger(formData.get("quantity")) };
+  const values = {
+    name: String(formData.get("name") || "").trim(),
+    category: formData.get("category") || "ציוד",
+    quantity: positiveInteger(formData.get("quantity")),
+  };
+  if (!state.tripCategories.includes(values.category)) state.tripCategories.push(values.category);
   if (id) {
     const item = state.tripItems.find((tripItem) => tripItem.id === id);
+    if (!item) return;
     const packed = formData.get("packed") === "on";
     const wasPacked = item.packed;
     Object.assign(item, values, { packed });
@@ -1246,6 +1754,7 @@ function submitTripItem(formData, id = null) {
   render();
 }
 
+/* Calendar invitations */
 /* Calendar invitations */
 function eventEmails(event) {
   const participants = Array.isArray(event.participants) ? event.participants : [];
