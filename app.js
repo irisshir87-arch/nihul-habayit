@@ -65,6 +65,7 @@ const defaultState = {
 
 let state = null;
 let editingShoppingId = null;
+let shoppingCategoryFilter = "הכל";
 let supabaseClient = null;
 let currentUser = null;
 let realtimeChannel = null;
@@ -464,6 +465,7 @@ function render() {
   const item = NAV_ITEMS.find((navItem) => navItem.id === currentScreen) || NAV_ITEMS[0];
   screenTitle.textContent = item.label;
   screenEyebrow.textContent = currentScreen === "home" ? "ניהול הבית · משפחת זילכה" : "משפחת זילכה";
+  quickAdd.hidden = currentScreen === "shopping";
   quickAdd.textContent = currentScreen === "home" ? "＋ הוספה מהירה" : `＋ ${addLabel(currentScreen)}`;
   quickAdd.onclick = () => currentScreen === "home" ? openQuickAdd() : openAddDialog(currentScreen);
 
@@ -550,24 +552,72 @@ function calendarHtml(year, monthIndex) {
 
 /* Shopping */
 function renderShopping() {
-  const active = state.shopping.filter((item) => !item.purchased);
-  const purchased = state.shopping.filter((item) => item.purchased);
-  return `<section class="shopping-page clean-shopping-page">
-    <div class="shopping-page-head">
-      <div><h3 class="card-title">רשימת קניות</h3><p class="muted small">כל המוצרים מוצגים מיד, מחולקים בכותרות קטגוריה וממוינים א׳–ב׳</p></div>
-      <button class="secondary-button compact-button" type="button" data-add-shopping-category>＋ קטגוריה</button>
+  const allActive = state.shopping.filter((item) => !item.purchased);
+  const allPurchased = state.shopping.filter((item) => item.purchased);
+  if (shoppingCategoryFilter !== "הכל" && !allActive.some((item) => (item.category || "אחר") === shoppingCategoryFilter)) {
+    shoppingCategoryFilter = "הכל";
+  }
+  const visibleActive = shoppingCategoryFilter === "הכל"
+    ? allActive
+    : allActive.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
+  const visiblePurchased = shoppingCategoryFilter === "הכל"
+    ? allPurchased
+    : allPurchased.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
+
+  return `<section class="shopping-page option-two-shopping-page">
+    <button class="shopping-add-bar" type="button" data-add-shopping-item>
+      <span class="shopping-add-plus">＋</span><span>הוספת מוצר לרשימה…</span>
+    </button>
+
+    <button class="shopping-add-category-link" type="button" data-add-shopping-category>＋ הוספת קטגוריה</button>
+
+    <div class="shopping-filter-strip" role="tablist" aria-label="סינון לפי קטגוריה">
+      ${shoppingFilterChipsHtml(allActive)}
     </div>
-    <div class="shopping-search-row">
-      <input class="search-field" id="shopping-search" placeholder="חיפוש מוצר..." />
-      <span class="shopping-active-count">${active.length} לקנייה</span>
-    </div>
-    <div class="shopping-section-title"><h3 class="card-title">לקנות</h3></div>
-    <div class="shopping-groups flat-shopping-groups">${shoppingGroupsHtml(active, false) || emptyHtml("רשימת הקניות ריקה")}</div>
-    <details class="purchased-section clean-purchased-section">
-      <summary>נרכשו <span class="count-pill completed">${purchased.length}</span></summary>
-      <div class="shopping-groups flat-shopping-groups purchased-groups">${shoppingGroupsHtml(purchased, true) || emptyHtml("עדיין לא סומנו פריטים כנרכשו")}</div>
+
+    <section class="shopping-unified-card">
+      <div class="shopping-unified-title">
+        <div><span class="shopping-basket-icon">🧺</span><h3>לרכישה</h3></div>
+        <span>${visibleActive.length}${shoppingCategoryFilter === "הכל" ? "" : ` מתוך ${allActive.length}`}</span>
+      </div>
+      <div class="shopping-unified-list">
+        ${shoppingListHtml(visibleActive, false) || emptyHtml(shoppingCategoryFilter === "הכל" ? "רשימת הקניות ריקה" : "אין מוצרים בקטגוריה הזו")}
+      </div>
+    </section>
+
+    <details class="shopping-purchased-card">
+      <summary><span><span class="purchased-check-icon">✓</span>נרכשו</span><span class="count-pill completed">${visiblePurchased.length}</span></summary>
+      <div class="shopping-unified-list purchased-list">
+        ${shoppingListHtml(visiblePurchased, true) || emptyHtml("עדיין לא סומנו פריטים כנרכשו")}
+      </div>
     </details>
   </section>`;
+}
+
+function shoppingFilterChipsHtml(activeItems) {
+  const counts = activeItems.reduce((map, item) => {
+    const category = item.category || "אחר";
+    map.set(category, (map.get(category) || 0) + 1);
+    return map;
+  }, new Map());
+  const categories = shoppingCategories().filter((category) => counts.has(category));
+  if (shoppingCategoryFilter !== "הכל" && !categories.includes(shoppingCategoryFilter)) shoppingCategoryFilter = "הכל";
+  const chips = ["הכל", ...categories];
+  return chips.map((category) => {
+    const selected = shoppingCategoryFilter === category;
+    const count = category === "הכל" ? activeItems.length : (counts.get(category) || 0);
+    const icon = category === "הכל" ? "☷" : shoppingCategoryIcon(category);
+    return `<button type="button" class="shopping-filter-chip ${selected ? "active" : ""}" data-shopping-filter="${escapeHtml(category)}" role="tab" aria-selected="${selected}">
+      <span class="shopping-filter-icon">${icon}</span><span>${escapeHtml(category)}</span><small>${count}</small>
+    </button>`;
+  }).join("");
+}
+
+function shoppingListHtml(items, purchased) {
+  return [...items]
+    .sort((a, b) => collator.compare(a.name, b.name))
+    .map((item) => item.id === editingShoppingId ? shoppingInlineEditHtml(item) : shoppingRowHtml(item, true))
+    .join("");
 }
 
 function shoppingCategories() {
@@ -624,10 +674,10 @@ function shoppingGroupsHtml(items, purchased) {
     }).join("");
 }
 
-function shoppingRowHtml(item) {
+function shoppingRowHtml(item, showCategory = false) {
   return `<div class="shopping-row" data-shopping-row data-shopping-id="${item.id}" data-name="${escapeHtml(normalizeName(item.name))}" data-category="${escapeHtml(item.category || "אחר")}">
     <button class="checkbox ${item.purchased ? "checked" : ""}" data-shopping-toggle="${item.id}" aria-label="${item.purchased ? "החזרה לרשימת הקניות" : "סימון כנרכש"}">${item.purchased ? "✓" : ""}</button>
-    <div class="shopping-product"><strong class="${item.purchased ? "strike" : ""}">${escapeHtml(item.name)}</strong></div>
+    <div class="shopping-product"><strong class="${item.purchased ? "strike" : ""}">${escapeHtml(item.name)}</strong>${showCategory && shoppingCategoryFilter === "הכל" ? `<small>${shoppingCategoryIcon(item.category || "אחר")} ${escapeHtml(item.category || "אחר")}</small>` : ""}</div>
     <div class="quantity-stepper always-visible" aria-label="כמות ${positiveInteger(item.quantity)}">
       <button type="button" class="stepper-button" data-shopping-quantity="${item.id}" data-delta="-1" aria-label="הפחתת כמות">−</button>
       <strong>${positiveInteger(item.quantity)}</strong>
@@ -839,7 +889,13 @@ function attachScreenEvents() {
   document.querySelectorAll("[data-inline-quantity-step]").forEach((button) => button.addEventListener("click", () => changeInlineShoppingQuantity(button, button.dataset.inlineQuantityStep)));
   document.querySelectorAll("[data-delete-shopping]").forEach((button) => button.addEventListener("click", () => deleteFrom("shopping", button.dataset.deleteShopping)));
   document.querySelector("#shopping-search")?.addEventListener("input", filterShoppingRows);
+  document.querySelector("[data-add-shopping-item]")?.addEventListener("click", () => openAddDialog("shopping"));
   document.querySelector("[data-add-shopping-category]")?.addEventListener("click", addShoppingCategory);
+  document.querySelectorAll("[data-shopping-filter]").forEach((button) => button.addEventListener("click", () => {
+    shoppingCategoryFilter = button.dataset.shoppingFilter || "הכל";
+    editingShoppingId = null;
+    render();
+  }));
 
   document.querySelectorAll("[data-edit-event]").forEach((button) => button.addEventListener("click", () => openEditDialog("events", button.dataset.editEvent)));
   document.querySelectorAll("[data-delete-event]").forEach((button) => button.addEventListener("click", () => deleteFrom("events", button.dataset.deleteEvent)));
