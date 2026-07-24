@@ -695,8 +695,7 @@ function calendarHtml(year, monthIndex) {
     const dayEvents = calendarEntriesForDate(key);
     const visibleEvents = dayEvents.slice(0, 2);
     const eventRows = visibleEvents.map((event, index) => {
-      const time = event.allDay ? "" : (event.startTime || "");
-      const label = `${time ? `${time} ` : ""}${event.title}`;
+      const label = event.title;
       return `<span class="calendar-event-chip calendar-event-${index + 1} ${event.isHoliday ? "holiday" : ""}" title="${escapeHtml(label)}"><span>${escapeHtml(label)}</span></span>`;
     }).join("");
     const moreEvents = dayEvents.length > 2
