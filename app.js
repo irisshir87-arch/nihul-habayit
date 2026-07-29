@@ -44,7 +44,10 @@ const NAV_ICONS = {
   tasks: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4" width="17" height="16" rx="2"/><path d="m7 9 1.5 1.5L11 8M13 9h4M7 15l1.5 1.5L11 14M13 15h4"/></svg>`,
   wishes: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 8.8c0 5.1-8.5 10.2-8.5 10.2S3.5 13.9 3.5 8.8A4.3 4.3 0 0 1 12 7.7a4.3 4.3 0 0 1 8.5 1.1Z"/></svg>`,
   trip: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="7" width="14" height="14" rx="2"/><path d="M9 7V5.5A2.5 2.5 0 0 1 11.5 3h1A2.5 2.5 0 0 1 15 5.5V7M9 12v4M15 12v4M5 13h14"/></svg>`,
+  admin: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4.5 6.5v5.2c0 4.6 3.1 7.8 7.5 9.3 4.4-1.5 7.5-4.7 7.5-9.3V6.5L12 3Z"/><path d="M9.2 12.1 11 14l3.9-4.2"/></svg>`,
 };
+
+const ADMIN_NAV_ITEM = { id: "admin", label: "ניהול משפחות", icon: NAV_ICONS.admin };
 
 const NAV_ITEMS = [
   { id: "home", label: "בית", icon: NAV_ICONS.home },
@@ -110,11 +113,15 @@ let currentUser = null;
 let currentHouseholdId = "";
 let currentHouseholdName = "";
 let currentMemberName = "";
+let currentUserIsAdmin = false;
+let adminCreateResult = null;
 let realtimeChannel = null;
 let cloudSaveTimer = null;
 let cloudStartedForUserId = null;
+const initialAuthParams = new URLSearchParams(location.hash.startsWith("#") ? location.hash.slice(1) : location.search);
+let pendingInviteFlow = initialAuthParams.get("type") === "invite";
 let currentScreen = location.hash.replace("#", "") || "home";
-if (!NAV_ITEMS.some((item) => item.id === currentScreen)) currentScreen = "home";
+if (!NAV_ITEMS.some((item) => item.id === currentScreen) && currentScreen !== "admin") currentScreen = "home";
 
 const app = document.querySelector("#app");
 const desktopNav = document.querySelector("#desktop-nav");
@@ -158,6 +165,12 @@ function updateMobileInstallAction() {
   const installButton = document.querySelector("#mobile-install-button");
   if (!installButton) return;
   installButton.hidden = isInstalledApp();
+}
+
+function updateMobileAdminAction() {
+  const adminButton = document.querySelector("#mobile-admin-button");
+  if (!adminButton) return;
+  adminButton.hidden = !currentUserIsAdmin;
 }
 
 function openInstallHelpDialog() {
@@ -217,6 +230,7 @@ function ensureMobileTopbarMenu() {
       <button id="mobile-more-button" class="icon-button mobile-more-button" type="button"
         aria-label="אפשרויות" aria-haspopup="menu" aria-expanded="false">⋮</button>
       <div id="mobile-app-menu-popover" class="mobile-app-menu-popover" role="menu" hidden>
+        <button id="mobile-admin-button" type="button" role="menuitem" hidden>ניהול משפחות</button>
         <button id="mobile-install-button" type="button" role="menuitem">＋ הוספה למסך הבית</button>
         <button id="mobile-sign-out-button" type="button" role="menuitem">יציאה</button>
       </div>`;
@@ -226,6 +240,10 @@ function ensureMobileTopbarMenu() {
       event.stopPropagation();
       const menu = wrapper.querySelector("#mobile-app-menu-popover");
       setMobileMenuOpen(Boolean(menu?.hidden));
+    });
+    wrapper.querySelector("#mobile-admin-button")?.addEventListener("click", () => {
+      setMobileMenuOpen(false);
+      navigate("admin");
     });
     wrapper.querySelector("#mobile-install-button")?.addEventListener("click", requestAppInstall);
     wrapper.querySelector("#mobile-sign-out-button")?.addEventListener("click", signOutCurrentUser);
@@ -241,6 +259,7 @@ function ensureMobileTopbarMenu() {
     mobileMenuDocumentListenerAttached = true;
   }
   updateMobileInstallAction();
+  updateMobileAdminAction();
 }
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -278,16 +297,19 @@ function prepareMultiHouseholdUi() {
 }
 
 function updateHouseholdUi() {
-  const householdLabel = currentHouseholdName || "המשפחה שלי";
-  document.title = `ניהול הבית | ${householdLabel}`;
+  const householdLabel = currentHouseholdName || (currentUserIsAdmin ? "ניהול משפחות" : "המשפחה שלי");
+  document.title = currentUserIsAdmin && !currentHouseholdId
+    ? "ניהול משפחות | ניהול הבית"
+    : `ניהול הבית | ${householdLabel}`;
   document.querySelectorAll(".sidebar .brand p").forEach((element) => {
     element.textContent = householdLabel;
   });
   if (signedInUser) {
-    signedInUser.textContent = currentMemberName
-      ? `${householdLabel} · ${currentMemberName}`
-      : householdLabel;
+    signedInUser.textContent = currentUserIsAdmin && !currentHouseholdId
+      ? "מנהלת האפליקציה"
+      : (currentMemberName ? `${householdLabel} · ${currentMemberName}` : householdLabel);
   }
+  updateMobileAdminAction();
 }
 
 function householdStorageKey() {
@@ -585,6 +607,19 @@ function subscribeToCloudState() {
     });
 }
 
+async function checkAdminAccess(user) {
+  const { data, error } = await supabaseClient
+    .from("app_admins")
+    .select("user_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) {
+    console.error("Could not check admin access", error);
+    return false;
+  }
+  return Boolean(data?.user_id);
+}
+
 async function resolveHouseholdContext(user) {
   const { data: membership, error: membershipError } = await supabaseClient
     .from("household_members")
@@ -594,7 +629,7 @@ async function resolveHouseholdContext(user) {
     .maybeSingle();
 
   if (membershipError) throw membershipError;
-  if (!membership?.household_id) throw new Error("המשתמש אינו משויך למשפחה");
+  if (!membership?.household_id) return false;
 
   const { data: household, error: householdError } = await supabaseClient
     .from("households")
@@ -614,6 +649,7 @@ async function resolveHouseholdContext(user) {
     : [currentMemberName].filter(Boolean);
   configureHouseholdMembers(fallbackMembers);
   updateHouseholdUi();
+  return true;
 }
 
 function showLogin(message = "") {
@@ -622,6 +658,8 @@ function showLogin(message = "") {
   currentHouseholdId = "";
   currentHouseholdName = "";
   currentMemberName = "";
+  currentUserIsAdmin = false;
+  adminCreateResult = null;
   configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
   prepareMultiHouseholdUi();
   setMobileMenuOpen(false);
@@ -635,18 +673,32 @@ function showLogin(message = "") {
 }
 
 async function startCloudApp(user) {
-  if (cloudStartedForUserId === user.id && currentHouseholdId) return;
+  if (cloudStartedForUserId === user.id && (currentHouseholdId || currentUserIsAdmin)) return;
   currentUser = user;
 
   try {
-    await resolveHouseholdContext(user);
+    currentUserIsAdmin = await checkAdminAccess(user);
+    const hasHousehold = await resolveHouseholdContext(user);
+    if (!hasHousehold && !currentUserIsAdmin) throw new Error("המשתמש אינו משויך למשפחה");
+
     cloudStartedForUserId = user.id;
     authScreen.classList.add("hidden");
     appShell.classList.remove("hidden");
-    mobileNav.classList.remove("hidden");
     signOutButton.classList.remove("hidden");
     signedInUser.classList.remove("hidden");
 
+    if (!hasHousehold && currentUserIsAdmin) {
+      currentScreen = "admin";
+      if (location.hash !== "#admin") history.replaceState({}, document.title, `${location.pathname}${location.search}#admin`);
+      state = null;
+      mobileNav.classList.add("hidden");
+      setSyncStatus("מצב ניהול");
+      updateHouseholdUi();
+      render();
+      return;
+    }
+
+    mobileNav.classList.remove("hidden");
     state = await loadCloudState();
     updateHouseholdUi();
     subscribeToCloudState();
@@ -655,7 +707,7 @@ async function startCloudApp(user) {
     console.error("Could not start cloud app", error);
     if (realtimeChannel) await supabaseClient.removeChannel(realtimeChannel);
     await supabaseClient.auth.signOut();
-    showLogin("החשבון עדיין לא שויך למשפחה. בדקי את ההגדרה ב־Supabase.");
+    showLogin("החשבון עדיין לא שויך למשפחה או לניהול. בדקי את ההגדרה ב־Supabase.");
   }
 }
 
@@ -677,29 +729,32 @@ async function initializeApp() {
     APP_CONFIG.supabasePublishableKey
   );
 
-  let passwordRecoveryHandled = false;
+  let passwordSetupHandled = false;
 
-  async function handlePasswordRecovery(nextSession) {
-    if (passwordRecoveryHandled || !nextSession?.user) return;
-    passwordRecoveryHandled = true;
+  async function handlePasswordSetup(nextSession, mode = "recovery") {
+    if (passwordSetupHandled || !nextSession?.user) return;
+    passwordSetupHandled = true;
+    const isInvite = mode === "invite";
 
-    const newPassword = window.prompt("הקלידי סיסמה חדשה לחשבון המשפחתי (לפחות 6 תווים):");
+    const newPassword = window.prompt(isInvite
+      ? "ברוכים הבאים! בחרו סיסמה לחשבון המשפחתי (לפחות 6 תווים):"
+      : "הקלידי סיסמה חדשה לחשבון המשפחתי (לפחות 6 תווים):");
     if (!newPassword) {
-      passwordRecoveryHandled = false;
+      passwordSetupHandled = false;
       showLogin();
       return;
     }
 
     if (newPassword.length < 6) {
-      window.alert("הסיסמה חייבת להכיל לפחות 6 תווים. פתחי שוב את קישור האיפוס ונסי מחדש.");
-      passwordRecoveryHandled = false;
+      window.alert("הסיסמה חייבת להכיל לפחות 6 תווים. פתחו שוב את הקישור ונסו מחדש.");
+      passwordSetupHandled = false;
       return;
     }
 
-    const confirmation = window.prompt("הקלידי שוב את הסיסמה החדשה:");
+    const confirmation = window.prompt("הקלידו שוב את הסיסמה:");
     if (newPassword !== confirmation) {
-      window.alert("הסיסמאות אינן תואמות. פתחי שוב את קישור האיפוס ונסי מחדש.");
-      passwordRecoveryHandled = false;
+      window.alert("הסיסמאות אינן תואמות. פתחו שוב את הקישור ונסו מחדש.");
+      passwordSetupHandled = false;
       return;
     }
 
@@ -707,19 +762,24 @@ async function initializeApp() {
     if (error) {
       console.error("Could not update password", error);
       window.alert(`לא ניתן לעדכן את הסיסמה: ${error.message}`);
-      passwordRecoveryHandled = false;
+      passwordSetupHandled = false;
       return;
     }
 
+    pendingInviteFlow = false;
     window.history.replaceState({}, document.title, window.location.pathname);
-    window.alert("הסיסמה עודכנה בהצלחה.");
+    window.alert(isInvite ? "הסיסמה נשמרה. אפשר להתחיל להשתמש באפליקציה." : "הסיסמה עודכנה בהצלחה.");
     await startCloudApp(nextSession.user);
   }
 
   supabaseClient.auth.onAuthStateChange((event, nextSession) => {
     setTimeout(async () => {
       if (event === "PASSWORD_RECOVERY") {
-        await handlePasswordRecovery(nextSession);
+        await handlePasswordSetup(nextSession, "recovery");
+        return;
+      }
+      if (pendingInviteFlow && nextSession?.user) {
+        await handlePasswordSetup(nextSession, "invite");
         return;
       }
       if (nextSession?.user) await startCloudApp(nextSession.user);
@@ -728,7 +788,8 @@ async function initializeApp() {
   });
 
   const { data: { session } } = await supabaseClient.auth.getSession();
-  if (session?.user) await startCloudApp(session.user);
+  if (session?.user && pendingInviteFlow) await handlePasswordSetup(session, "invite");
+  else if (session?.user) await startCloudApp(session.user);
   else showLogin();
 }
 
@@ -783,16 +844,24 @@ function moreMenuHtml(actions) {
   return `<details class="more-menu"><summary aria-label="פעולות נוספות">⋯</summary><div class="more-menu-popover">${actions}</div></details>`;
 }
 
+function availableNavItems() {
+  if (currentUserIsAdmin && !currentHouseholdId) return [ADMIN_NAV_ITEM];
+  return currentUserIsAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
+}
+
 function renderNavigation() {
-  const html = NAV_ITEMS.map((item) => `
+  const items = availableNavItems();
+  const html = items.map((item) => `
     <button class="nav-button ${item.id === currentScreen ? "active" : ""}" data-nav="${item.id}">
       <span class="nav-icon">${item.icon}</span><span>${item.label}</span>
     </button>`).join("");
   desktopNav.innerHTML = html;
-  mobileNav.innerHTML = html;
+  mobileNav.innerHTML = currentUserIsAdmin && !currentHouseholdId ? "" : html;
+  mobileNav.classList.toggle("hidden", currentUserIsAdmin && !currentHouseholdId);
 }
 
 function navigate(screen) {
+  if (!availableNavItems().some((item) => item.id === screen)) return;
   currentScreen = screen;
   location.hash = screen;
   render();
@@ -800,14 +869,24 @@ function navigate(screen) {
 
 function render() {
   renderNavigation();
-  const item = NAV_ITEMS.find((navItem) => navItem.id === currentScreen) || NAV_ITEMS[0];
+  updateMobileAdminAction();
+  const items = availableNavItems();
+  if (!items.some((item) => item.id === currentScreen)) currentScreen = items[0]?.id || "home";
+  const item = items.find((navItem) => navItem.id === currentScreen) || items[0] || NAV_ITEMS[0];
   const showHomeIdentity = currentScreen === "home";
+  const showAdmin = currentScreen === "admin";
   screenTitle.textContent = showHomeIdentity ? "ניהול הבית" : item.label;
-  screenEyebrow.hidden = !showHomeIdentity;
-  screenEyebrow.textContent = showHomeIdentity ? (currentHouseholdName || "המשפחה שלי") : "";
-  quickAdd.hidden = false;
-  quickAdd.textContent = showHomeIdentity ? "＋ הוספה מהירה" : `＋ ${addLabel(currentScreen)}`;
-  quickAdd.onclick = () => currentScreen === "home" ? openQuickAdd() : openAddDialog(currentScreen);
+  screenEyebrow.hidden = !(showHomeIdentity || showAdmin);
+  screenEyebrow.textContent = showHomeIdentity
+    ? (currentHouseholdName || "המשפחה שלי")
+    : (showAdmin ? "מנהלת האפליקציה" : "");
+  quickAdd.hidden = showAdmin;
+  if (!showAdmin) {
+    quickAdd.textContent = showHomeIdentity ? "＋ הוספה מהירה" : `＋ ${addLabel(currentScreen)}`;
+    quickAdd.onclick = () => currentScreen === "home" ? openQuickAdd() : openAddDialog(currentScreen);
+  } else {
+    quickAdd.onclick = null;
+  }
 
   const renderers = {
     home: renderHome,
@@ -816,6 +895,7 @@ function render() {
     tasks: renderTasks,
     wishes: renderWishes,
     trip: renderTrip,
+    admin: renderAdminFamilies,
   };
   app.innerHTML = renderers[currentScreen]();
   attachScreenEvents();
@@ -903,6 +983,117 @@ function calendarEntriesForDate(key) {
     .filter((event) => event.date === key)
     .sort((a, b) => `${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
   return holiday ? [holiday, ...events] : events;
+}
+
+function adminMemberRowHtml(index, values = {}) {
+  const required = index === 0 ? "required" : "";
+  return `<div class="admin-member-row" data-admin-member-row>
+    <label>שם פרטי
+      <input type="text" name="member-name-${index}" maxlength="50" value="${escapeHtml(values.displayName || "")}" placeholder="לדוגמה: נדב" ${required} />
+    </label>
+    <label>אימייל
+      <input type="email" name="member-email-${index}" maxlength="254" value="${escapeHtml(values.email || "")}" placeholder="name@example.com" inputmode="email" ${required} />
+    </label>
+    <button type="button" class="icon-button admin-remove-member" data-remove-admin-member aria-label="הסרת משתמש" ${index < 2 ? "hidden" : ""}>×</button>
+  </div>`;
+}
+
+function renderAdminFamilies() {
+  const success = adminCreateResult?.ok ? `<section class="admin-success-card" aria-live="polite">
+    <strong>משפחת ${escapeHtml(adminCreateResult.household?.name || "")} נפתחה בהצלחה</strong>
+    <span>נשלחו הזמנות אל ${adminCreateResult.members.map((member) => escapeHtml(member.email)).join(" ו־")}.</span>
+    <span>כל משתמש יפתח את הקישור במייל ויבחר לעצמו סיסמה.</span>
+  </section>` : "";
+
+  return `<section class="admin-page">
+    ${success}
+    <section class="card admin-create-card">
+      <div class="admin-card-heading">
+        <div><h3 class="card-title">פתיחת משפחה חדשה</h3><p class="muted">ממלאים את הפרטים ושולחים הזמנה. אין צורך ליצור משתמשים או להריץ SQL.</p></div>
+        <span class="admin-lock-badge">🔒 למנהלת בלבד</span>
+      </div>
+      <form id="create-family-form" class="admin-family-form">
+        <label class="admin-household-name">שם המשפחה
+          <input id="admin-household-name" type="text" maxlength="80" placeholder="לדוגמה: משפחת כהן" required />
+        </label>
+        <div class="admin-members-heading"><strong>בני המשפחה</strong><span class="muted small">לפחות משתמש אחד</span></div>
+        <div id="admin-members-list" class="admin-members-list">
+          ${adminMemberRowHtml(0)}
+          ${adminMemberRowHtml(1)}
+        </div>
+        <button type="button" class="secondary-button admin-add-member" data-add-admin-member>＋ הוספת משתמש נוסף</button>
+        <div id="admin-form-message" class="admin-form-message" role="alert"></div>
+        <button id="create-family-submit" type="submit" class="primary-button admin-submit-button">פתיחת משפחה ושליחת הזמנות</button>
+      </form>
+    </section>
+  </section>`;
+}
+
+function addAdminMemberRow() {
+  const list = document.querySelector("#admin-members-list");
+  if (!list) return;
+  const count = list.querySelectorAll("[data-admin-member-row]").length;
+  if (count >= 10) {
+    showToast("אפשר להוסיף עד 10 משתמשים למשפחה");
+    return;
+  }
+  list.insertAdjacentHTML("beforeend", adminMemberRowHtml(count));
+  attachAdminMemberRemoveEvents();
+}
+
+function attachAdminMemberRemoveEvents() {
+  document.querySelectorAll("[data-remove-admin-member]").forEach((button) => {
+    button.onclick = () => button.closest("[data-admin-member-row]")?.remove();
+  });
+}
+
+async function submitCreateFamily(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submit = document.querySelector("#create-family-submit");
+  const message = document.querySelector("#admin-form-message");
+  const householdName = String(document.querySelector("#admin-household-name")?.value || "").trim();
+  const members = [...form.querySelectorAll("[data-admin-member-row]")]
+    .map((row) => ({
+      displayName: String(row.querySelector('input[type="text"]')?.value || "").trim(),
+      email: String(row.querySelector('input[type="email"]')?.value || "").trim().toLowerCase(),
+    }))
+    .filter((member) => member.displayName || member.email);
+
+  message.textContent = "";
+  if (!householdName || !members.length || members.some((member) => !member.displayName || !member.email)) {
+    message.textContent = "יש למלא שם משפחה ושם ואימייל לכל משתמש שהוספת.";
+    return;
+  }
+
+  submit.disabled = true;
+  submit.textContent = "פותחת משפחה ושולחת הזמנות…";
+  try {
+    const { data, error } = await supabaseClient.functions.invoke("create-family", {
+      body: { householdName, members },
+    });
+    if (error) {
+      let detailedMessage = data?.error || error.message || "פתיחת המשפחה נכשלה.";
+      try {
+        if (error.context && typeof error.context.json === "function") {
+          const body = await error.context.json();
+          detailedMessage = body?.error || detailedMessage;
+        }
+      } catch (contextError) {
+        console.warn("Could not read function error response", contextError);
+      }
+      throw new Error(detailedMessage);
+    }
+    if (!data?.ok) throw new Error(data?.error || "פתיחת המשפחה נכשלה.");
+    adminCreateResult = data;
+    showToast("המשפחה נפתחה וההזמנות נשלחו");
+    render();
+  } catch (error) {
+    console.error("Could not create family", error);
+    message.textContent = error instanceof Error ? error.message : "פתיחת המשפחה נכשלה.";
+    submit.disabled = false;
+    submit.textContent = "פתיחת משפחה ושליחת הזמנות";
+  }
 }
 
 function renderHome() {
@@ -1537,6 +1728,9 @@ function emptyHtml(message) {
 /* Event bindings */
 function attachScreenEvents() {
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.nav)));
+  document.querySelector("#create-family-form")?.addEventListener("submit", submitCreateFamily);
+  document.querySelector("[data-add-admin-member]")?.addEventListener("click", addAdminMemberRow);
+  attachAdminMemberRemoveEvents();
   document.querySelectorAll("[data-add]").forEach((button) => button.addEventListener("click", () => openAddDialog(button.dataset.add)));
   document.querySelectorAll("[data-home-shopping-category]").forEach((button) => button.addEventListener("click", () => {
     shoppingCategoryFilter = button.dataset.homeShoppingCategory || "הכל";
@@ -2181,8 +2375,10 @@ function resetDemo() {
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => dialog.close()));
 document.querySelector("#reset-demo").addEventListener("click", resetDemo);
 window.addEventListener("hashchange", () => {
-  currentScreen = location.hash.replace("#", "") || "home";
-  if (!NAV_ITEMS.some((item) => item.id === currentScreen)) currentScreen = "home";
+  const requestedScreen = location.hash.replace("#", "") || "home";
+  currentScreen = availableNavItems().some((item) => item.id === requestedScreen)
+    ? requestedScreen
+    : (availableNavItems()[0]?.id || "home");
   render();
 });
 
