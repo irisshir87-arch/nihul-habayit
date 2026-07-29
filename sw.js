@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-11-multifamily";
+const CACHE = "nihul-habayit-v15-12-mobile-actions";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {

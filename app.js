@@ -139,6 +139,120 @@ const authMessage = document.querySelector("#auth-message");
 const signOutButton = document.querySelector("#sign-out");
 const signedInUser = document.querySelector("#signed-in-user");
 const syncIndicator = document.querySelector(".sync-indicator");
+let deferredInstallPrompt = null;
+let mobileMenuDocumentListenerAttached = false;
+
+function isInstalledApp() {
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
+}
+
+function setMobileMenuOpen(open) {
+  const menu = document.querySelector("#mobile-app-menu-popover");
+  const button = document.querySelector("#mobile-more-button");
+  if (!menu || !button) return;
+  menu.hidden = !open;
+  button.setAttribute("aria-expanded", String(open));
+}
+
+function updateMobileInstallAction() {
+  const installButton = document.querySelector("#mobile-install-button");
+  if (!installButton) return;
+  installButton.hidden = isInstalledApp();
+}
+
+function openInstallHelpDialog() {
+  dialogEyebrow.textContent = "גישה מהירה";
+  dialogTitle.textContent = "הוספה למסך הבית";
+  dialogBody.innerHTML = `
+    <div class="install-help">
+      <p>האפליקציה לא הציגה כרגע חלון התקנה אוטומטי.</p>
+      <ol>
+        <li>פתחי את האתר ישירות ב־Chrome או ב־Samsung Internet.</li>
+        <li>פתחי את תפריט הדפדפן ובחרי <strong>התקנת אפליקציה</strong> או <strong>הוספה למסך הבית</strong>.</li>
+        <li>אם האתר פתוח כבר מתוך אייקון במסך הבית, האפליקציה כבר מותקנת.</li>
+      </ol>
+    </div>`;
+  dialogSubmit.hidden = true;
+  dialogForm.onsubmit = null;
+  if (dialog.open) dialog.close();
+  dialog.showModal();
+}
+
+async function requestAppInstall() {
+  setMobileMenuOpen(false);
+  if (isInstalledApp()) {
+    showToast("האפליקציה כבר נמצאת במסך הבית");
+    updateMobileInstallAction();
+    return;
+  }
+  if (!deferredInstallPrompt) {
+    openInstallHelpDialog();
+    return;
+  }
+  const promptEvent = deferredInstallPrompt;
+  deferredInstallPrompt = null;
+  await promptEvent.prompt();
+  const choice = await promptEvent.userChoice.catch(() => null);
+  if (choice?.outcome === "accepted") showToast("האפליקציה נוספה למסך הבית");
+  updateMobileInstallAction();
+}
+
+async function signOutCurrentUser() {
+  setMobileMenuOpen(false);
+  if (realtimeChannel) await supabaseClient.removeChannel(realtimeChannel);
+  realtimeChannel = null;
+  await supabaseClient.auth.signOut();
+}
+
+function ensureMobileTopbarMenu() {
+  const actions = document.querySelector(".topbar-actions");
+  if (!actions) return;
+
+  let wrapper = document.querySelector("#mobile-app-menu");
+  if (!wrapper) {
+    wrapper = document.createElement("div");
+    wrapper.id = "mobile-app-menu";
+    wrapper.className = "mobile-app-menu";
+    wrapper.innerHTML = `
+      <button id="mobile-more-button" class="icon-button mobile-more-button" type="button"
+        aria-label="אפשרויות" aria-haspopup="menu" aria-expanded="false">⋮</button>
+      <div id="mobile-app-menu-popover" class="mobile-app-menu-popover" role="menu" hidden>
+        <button id="mobile-install-button" type="button" role="menuitem">＋ הוספה למסך הבית</button>
+        <button id="mobile-sign-out-button" type="button" role="menuitem">יציאה</button>
+      </div>`;
+    actions.appendChild(wrapper);
+
+    wrapper.querySelector("#mobile-more-button")?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const menu = wrapper.querySelector("#mobile-app-menu-popover");
+      setMobileMenuOpen(Boolean(menu?.hidden));
+    });
+    wrapper.querySelector("#mobile-install-button")?.addEventListener("click", requestAppInstall);
+    wrapper.querySelector("#mobile-sign-out-button")?.addEventListener("click", signOutCurrentUser);
+  }
+
+  if (!mobileMenuDocumentListenerAttached) {
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("#mobile-app-menu")) setMobileMenuOpen(false);
+    });
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 760) setMobileMenuOpen(false);
+    });
+    mobileMenuDocumentListenerAttached = true;
+  }
+  updateMobileInstallAction();
+}
+
+window.addEventListener("beforeinstallprompt", (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  updateMobileInstallAction();
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  updateMobileInstallAction();
+  showToast("האפליקציה נוספה למסך הבית");
+});
 
 function prepareMultiHouseholdUi() {
   document.title = "ניהול הבית";
@@ -160,6 +274,7 @@ function prepareMultiHouseholdUi() {
   });
   const demoResetButton = document.querySelector("#reset-demo");
   if (demoResetButton && SUPABASE_ENABLED) demoResetButton.hidden = true;
+  ensureMobileTopbarMenu();
 }
 
 function updateHouseholdUi() {
@@ -509,6 +624,7 @@ function showLogin(message = "") {
   currentMemberName = "";
   configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
   prepareMultiHouseholdUi();
+  setMobileMenuOpen(false);
   appShell.classList.add("hidden");
   mobileNav.classList.add("hidden");
   authScreen.classList.remove("hidden");
@@ -2085,11 +2201,7 @@ authForm?.addEventListener("submit", async (event) => {
   if (error) authMessage.textContent = "האימייל או הסיסמה אינם נכונים.";
 });
 
-signOutButton?.addEventListener("click", async () => {
-  if (realtimeChannel) await supabaseClient.removeChannel(realtimeChannel);
-  realtimeChannel = null;
-  await supabaseClient.auth.signOut();
-});
+signOutButton?.addEventListener("click", signOutCurrentUser);
 
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   navigator.serviceWorker.register("sw.js").catch(console.warn);
