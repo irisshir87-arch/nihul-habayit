@@ -1,18 +1,35 @@
-const STORAGE_KEY = "zilcha-home-management-v1";
+const STORAGE_KEY_PREFIX = "home-management-v2";
+const LEGACY_STORAGE_KEY = "zilcha-home-management-v1";
 const APP_CONFIG = window.APP_CONFIG || {};
 const SUPABASE_ENABLED = Boolean(
   APP_CONFIG.supabaseUrl &&
   APP_CONFIG.supabasePublishableKey &&
-  APP_CONFIG.sharedLoginEmail &&
-  APP_CONFIG.householdId &&
   window.supabase
 );
 const collator = new Intl.Collator("he", { sensitivity: "base", numeric: true });
 
-const HOUSEHOLD_MEMBERS = ["איריס", "תומר"];
-const TASK_ASSIGNEES = ["איריס", "תומר", "איריס ותומר"];
-const TASK_ASSIGNEE_LABELS = { "איריס": "איריס", "תומר": "תומר", "איריס ותומר": "ביחד" };
-const WISH_DEFAULT_CATEGORIES = ["בית", "ילדים", "תומר", "איריס", "מתכונים", "אטרקציות"];
+const DEFAULT_HOUSEHOLD_MEMBERS = ["איריס", "תומר"];
+const WISH_BASE_CATEGORIES = ["בית", "ילדים", "מתכונים", "אטרקציות"];
+let HOUSEHOLD_MEMBERS = [...DEFAULT_HOUSEHOLD_MEMBERS];
+let TASK_ASSIGNEES = [];
+let TASK_ASSIGNEE_LABELS = {};
+let WISH_DEFAULT_CATEGORIES = [];
+
+function configureHouseholdMembers(members) {
+  const cleanMembers = [...new Set((Array.isArray(members) ? members : [])
+    .map((name) => String(name || "").trim())
+    .filter(Boolean))];
+  HOUSEHOLD_MEMBERS = cleanMembers.length ? cleanMembers : [...DEFAULT_HOUSEHOLD_MEMBERS];
+  const together = HOUSEHOLD_MEMBERS.join(" ו");
+  TASK_ASSIGNEES = HOUSEHOLD_MEMBERS.length > 1
+    ? [...HOUSEHOLD_MEMBERS, together]
+    : [...HOUSEHOLD_MEMBERS];
+  TASK_ASSIGNEE_LABELS = Object.fromEntries(HOUSEHOLD_MEMBERS.map((name) => [name, name]));
+  if (HOUSEHOLD_MEMBERS.length > 1) TASK_ASSIGNEE_LABELS[together] = "ביחד";
+  WISH_DEFAULT_CATEGORIES = [...new Set([...WISH_BASE_CATEGORIES, ...HOUSEHOLD_MEMBERS])];
+}
+
+configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
 const SHOPPING_DEFAULT_CATEGORIES = [
   "בשר", "מאפים", "מוצרי חלב", "מזווה", "מתוקים", "נקניק",
   "ניקיון", "פארם", "פירות וירקות", "קפואים", "שתייה", "אחר"
@@ -39,6 +56,7 @@ const NAV_ITEMS = [
 ];
 
 const defaultState = {
+  householdMembers: [...DEFAULT_HOUSEHOLD_MEMBERS],
   shopping: [
     { id: crypto.randomUUID(), name: "אבוקדו", quantity: 3, category: "פירות וירקות", purchased: false, purchasedAt: null },
     { id: crypto.randomUUID(), name: "ביצים", quantity: 1, category: "מוצרי חלב", purchased: false, purchasedAt: null },
@@ -89,6 +107,9 @@ let taskDragState = null;
 let suppressTaskClickUntil = 0;
 let supabaseClient = null;
 let currentUser = null;
+let currentHouseholdId = "";
+let currentHouseholdName = "";
+let currentMemberName = "";
 let realtimeChannel = null;
 let cloudSaveTimer = null;
 let cloudStartedForUserId = null;
@@ -111,6 +132,7 @@ const toast = document.querySelector("#toast");
 const appShell = document.querySelector("#app-shell");
 const authScreen = document.querySelector("#auth-screen");
 const authForm = document.querySelector("#auth-form");
+let authEmail = document.querySelector("#auth-email");
 const authPassword = document.querySelector("#auth-password");
 const authSubmit = document.querySelector("#auth-submit");
 const authMessage = document.querySelector("#auth-message");
@@ -118,8 +140,70 @@ const signOutButton = document.querySelector("#sign-out");
 const signedInUser = document.querySelector("#signed-in-user");
 const syncIndicator = document.querySelector(".sync-indicator");
 
+function prepareMultiHouseholdUi() {
+  document.title = "ניהול הבית";
+  const authEyebrow = authScreen?.querySelector(".auth-brand .eyebrow");
+  if (authEyebrow) authEyebrow.textContent = "ניהול הבית";
+  const authHint = authScreen?.querySelector(".auth-card > .muted");
+  if (authHint) authHint.textContent = "הזינו את כתובת האימייל והסיסמה שלכם.";
+
+  if (authForm && !authEmail) {
+    const emailLabel = document.createElement("label");
+    emailLabel.textContent = "אימייל";
+    emailLabel.innerHTML += '<input id="auth-email" type="email" autocomplete="username" inputmode="email" required />';
+    authForm.insertBefore(emailLabel, authForm.firstElementChild);
+    authEmail = emailLabel.querySelector("#auth-email");
+  }
+
+  document.querySelectorAll(".sidebar .brand p").forEach((element) => {
+    element.textContent = currentHouseholdName || "המשפחה שלי";
+  });
+  const demoResetButton = document.querySelector("#reset-demo");
+  if (demoResetButton && SUPABASE_ENABLED) demoResetButton.hidden = true;
+}
+
+function updateHouseholdUi() {
+  const householdLabel = currentHouseholdName || "המשפחה שלי";
+  document.title = `ניהול הבית | ${householdLabel}`;
+  document.querySelectorAll(".sidebar .brand p").forEach((element) => {
+    element.textContent = householdLabel;
+  });
+  if (signedInUser) {
+    signedInUser.textContent = currentMemberName
+      ? `${householdLabel} · ${currentMemberName}`
+      : householdLabel;
+  }
+}
+
+function householdStorageKey() {
+  return currentHouseholdId
+    ? `${STORAGE_KEY_PREFIX}:${currentHouseholdId}`
+    : `${STORAGE_KEY_PREFIX}:local`;
+}
+
+function createEmptyHouseholdState() {
+  return {
+    householdMembers: [...HOUSEHOLD_MEMBERS],
+    shopping: [],
+    shoppingCategories: [...SHOPPING_DEFAULT_CATEGORIES],
+    memberEmails: { iris: "", tomer: "" },
+    events: [],
+    taskCategories: [...TASK_CATEGORIES],
+    tasks: [],
+    wishCategories: [...WISH_DEFAULT_CATEGORIES],
+    wishes: [],
+    tripCategories: [...TRIP_DEFAULT_CATEGORIES],
+    tripItems: [],
+    tripArchive: [],
+  };
+}
+
+prepareMultiHouseholdUi();
+
 function cloneDefaultState() {
-  return JSON.parse(JSON.stringify(defaultState));
+  const cloned = JSON.parse(JSON.stringify(defaultState));
+  cloned.householdMembers = [...HOUSEHOLD_MEMBERS];
+  return cloned;
 }
 
 function validStoredId(value) {
@@ -145,6 +229,12 @@ function normalizeCategoryList(defaults, stored, itemCategories) {
 function normalizeState(input) {
   try {
     const loaded = input ? JSON.parse(JSON.stringify(input)) : cloneDefaultState();
+
+    const storedMembers = Array.isArray(loaded.householdMembers)
+      ? loaded.householdMembers
+      : HOUSEHOLD_MEMBERS;
+    configureHouseholdMembers(storedMembers);
+    loaded.householdMembers = [...HOUSEHOLD_MEMBERS];
 
     loaded.shopping = Array.isArray(loaded.shopping) ? loaded.shopping : [];
     ensureCollectionIds(loaded.shopping);
@@ -175,7 +265,7 @@ function normalizeState(input) {
         const participantNames = (event.participantIds || [])
           .map((id) => oldContacts.find((contact) => contact.id === id)?.name)
           .filter(Boolean)
-          .map((name) => name === "אמא" ? "איריס" : name === "אבא" ? "תומר" : name)
+          .map((name) => name === "אמא" ? HOUSEHOLD_MEMBERS[0] : name === "אבא" ? (HOUSEHOLD_MEMBERS[1] || HOUSEHOLD_MEMBERS[0]) : name)
           .filter((name) => HOUSEHOLD_MEMBERS.includes(name));
         event.participants = [...new Set(participantNames)];
       }
@@ -194,11 +284,12 @@ function normalizeState(input) {
     loaded.tasks.forEach((task, index) => {
       task.title = String(task.title || task.name || "").trim();
       task.notes = String(task.notes || task.description || "").trim();
-      task.assignee = task.assignee === "אמא" ? "איריס"
-        : task.assignee === "אבא" ? "תומר"
-        : task.assignee === "שנינו" ? "איריס ותומר"
+      const togetherAssignee = HOUSEHOLD_MEMBERS.join(" ו");
+      task.assignee = task.assignee === "אמא" ? HOUSEHOLD_MEMBERS[0]
+        : task.assignee === "אבא" ? (HOUSEHOLD_MEMBERS[1] || HOUSEHOLD_MEMBERS[0])
+        : task.assignee === "שנינו" ? togetherAssignee
         : TASK_ASSIGNEES.includes(task.assignee) ? task.assignee
-        : "איריס";
+        : HOUSEHOLD_MEMBERS[0];
       task.category = String(task.category || "אחר").trim() || "אחר";
       task.completed = Boolean(task.completed);
       task.order = Number.isFinite(Number(task.order)) ? Number(task.order) : index;
@@ -238,7 +329,7 @@ function normalizeState(input) {
       loaded.wishes.map((wish) => wish.category)
     );
 
-    loaded.tripItems = Array.isArray(loaded.tripItems) ? loaded.tripItems : cloneDefaultState().tripItems;
+    loaded.tripItems = Array.isArray(loaded.tripItems) ? loaded.tripItems : [];
     loaded.tripArchive = Array.isArray(loaded.tripArchive) ? loaded.tripArchive : [];
     ensureCollectionIds(loaded.tripItems);
     ensureCollectionIds(loaded.tripArchive);
@@ -268,18 +359,22 @@ function normalizeState(input) {
 }
 
 
-function loadLocalState() {
+function loadLocalState(options = {}) {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return normalizeState(saved ? JSON.parse(saved) : cloneDefaultState());
+    let saved = localStorage.getItem(householdStorageKey());
+    if (!saved && options.allowLegacy && currentHouseholdName === "משפחת זילכה") {
+      saved = localStorage.getItem(LEGACY_STORAGE_KEY);
+    }
+    const fallback = options.empty ? createEmptyHouseholdState() : cloneDefaultState();
+    return normalizeState(saved ? JSON.parse(saved) : fallback);
   } catch (error) {
     console.warn("Could not load saved data", error);
-    return cloneDefaultState();
+    return normalizeState(options.empty ? createEmptyHouseholdState() : cloneDefaultState());
   }
 }
 
 function saveState(message = "נשמר") {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  localStorage.setItem(householdStorageKey(), JSON.stringify(state));
   if (SUPABASE_ENABLED && currentUser) {
     scheduleCloudSave(message);
   } else if (message) {
@@ -299,7 +394,7 @@ function scheduleCloudSave(message) {
   clearTimeout(cloudSaveTimer);
   cloudSaveTimer = setTimeout(async () => {
     const payload = {
-      household_id: APP_CONFIG.householdId,
+      household_id: currentHouseholdId,
       state,
       updated_by: currentUser.id,
       updated_at: new Date().toISOString(),
@@ -324,22 +419,23 @@ async function loadCloudState() {
   const { data, error } = await supabaseClient
     .from("household_state")
     .select("state")
-    .eq("household_id", APP_CONFIG.householdId)
+    .eq("household_id", currentHouseholdId)
     .maybeSingle();
 
   if (error) throw error;
   if (data?.state) {
     const loaded = normalizeState(data.state);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(loaded));
+    localStorage.setItem(householdStorageKey(), JSON.stringify(loaded));
     setSyncStatus("מסונכרן");
     return loaded;
   }
 
-  const initial = loadLocalState();
+  const initial = normalizeState(createEmptyHouseholdState());
+  localStorage.setItem(householdStorageKey(), JSON.stringify(initial));
   const { error: insertError } = await supabaseClient
     .from("household_state")
     .insert({
-      household_id: APP_CONFIG.householdId,
+      household_id: currentHouseholdId,
       state: initial,
       updated_by: currentUser.id,
     });
@@ -351,19 +447,19 @@ async function loadCloudState() {
 function subscribeToCloudState() {
   if (realtimeChannel) supabaseClient.removeChannel(realtimeChannel);
   realtimeChannel = supabaseClient
-    .channel(`household-${APP_CONFIG.householdId}`)
+    .channel(`household-${currentHouseholdId}`)
     .on(
       "postgres_changes",
       {
         event: "*",
         schema: "public",
         table: "household_state",
-        filter: `household_id=eq.${APP_CONFIG.householdId}`,
+        filter: `household_id=eq.${currentHouseholdId}`,
       },
       (payload) => {
         if (!payload.new?.state) return;
         state = normalizeState(payload.new.state);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        localStorage.setItem(householdStorageKey(), JSON.stringify(state));
         setSyncStatus("מסונכרן");
         render();
       }
@@ -374,43 +470,84 @@ function subscribeToCloudState() {
     });
 }
 
-function showLogin() {
+async function resolveHouseholdContext(user) {
+  const { data: membership, error: membershipError } = await supabaseClient
+    .from("household_members")
+    .select("household_id, display_name")
+    .eq("user_id", user.id)
+    .limit(1)
+    .maybeSingle();
+
+  if (membershipError) throw membershipError;
+  if (!membership?.household_id) throw new Error("המשתמש אינו משויך למשפחה");
+
+  const { data: household, error: householdError } = await supabaseClient
+    .from("households")
+    .select("name")
+    .eq("id", membership.household_id)
+    .maybeSingle();
+
+  if (householdError) throw householdError;
+  if (!household?.name) throw new Error("לא נמצאה משפחה למשתמש");
+
+  currentHouseholdId = membership.household_id;
+  currentHouseholdName = String(household.name).trim();
+  currentMemberName = String(membership.display_name || "").trim();
+
+  const fallbackMembers = currentHouseholdName === "משפחת זילכה"
+    ? [...DEFAULT_HOUSEHOLD_MEMBERS]
+    : [currentMemberName].filter(Boolean);
+  configureHouseholdMembers(fallbackMembers);
+  updateHouseholdUi();
+}
+
+function showLogin(message = "") {
   currentUser = null;
   cloudStartedForUserId = null;
+  currentHouseholdId = "";
+  currentHouseholdName = "";
+  currentMemberName = "";
+  configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
+  prepareMultiHouseholdUi();
   appShell.classList.add("hidden");
   mobileNav.classList.add("hidden");
   authScreen.classList.remove("hidden");
   signOutButton.classList.add("hidden");
   signedInUser.classList.add("hidden");
-  authMessage.textContent = "";
+  authMessage.textContent = message;
+  if (authPassword) authPassword.value = "";
 }
 
 async function startCloudApp(user) {
-  if (cloudStartedForUserId === user.id) return;
-  cloudStartedForUserId = user.id;
+  if (cloudStartedForUserId === user.id && currentHouseholdId) return;
   currentUser = user;
-  authScreen.classList.add("hidden");
-  appShell.classList.remove("hidden");
-  mobileNav.classList.remove("hidden");
-  signOutButton.classList.remove("hidden");
-  signedInUser.classList.remove("hidden");
-  signedInUser.textContent = "משפחת זילכה";
 
   try {
+    await resolveHouseholdContext(user);
+    cloudStartedForUserId = user.id;
+    authScreen.classList.add("hidden");
+    appShell.classList.remove("hidden");
+    mobileNav.classList.remove("hidden");
+    signOutButton.classList.remove("hidden");
+    signedInUser.classList.remove("hidden");
+
     state = await loadCloudState();
+    updateHouseholdUi();
     subscribeToCloudState();
     render();
   } catch (error) {
     console.error("Could not start cloud app", error);
-    state = loadLocalState();
-    setSyncStatus("אין הרשאה", "error");
-    render();
-    showToast("לא ניתן לגשת לבית המשותף. בדקי את הגדרות Supabase וההרשאות.");
+    if (realtimeChannel) await supabaseClient.removeChannel(realtimeChannel);
+    await supabaseClient.auth.signOut();
+    showLogin("החשבון עדיין לא שויך למשפחה. בדקי את ההגדרה ב־Supabase.");
   }
 }
 
 async function initializeApp() {
   if (!SUPABASE_ENABLED) {
+    currentHouseholdName = "המשפחה שלי";
+    configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
+    updateHouseholdUi();
     state = loadLocalState();
     appShell.classList.remove("hidden");
     mobileNav.classList.remove("hidden");
@@ -551,7 +688,7 @@ function render() {
   const showHomeIdentity = currentScreen === "home";
   screenTitle.textContent = showHomeIdentity ? "ניהול הבית" : item.label;
   screenEyebrow.hidden = !showHomeIdentity;
-  screenEyebrow.textContent = showHomeIdentity ? "משפחת זילכה" : "";
+  screenEyebrow.textContent = showHomeIdentity ? (currentHouseholdName || "המשפחה שלי") : "";
   quickAdd.hidden = false;
   quickAdd.textContent = showHomeIdentity ? "＋ הוספה מהירה" : `＋ ${addLabel(currentScreen)}`;
   quickAdd.onclick = () => currentScreen === "home" ? openQuickAdd() : openAddDialog(currentScreen);
@@ -1899,7 +2036,7 @@ function downloadICS(eventId) {
     dateLines = [`DTSTART:${dateOnly}T${startTime.replace(":", "")}00`, `DTEND:${dateOnly}T${endTime.replace(":", "")}00`];
   }
   const ics = [
-    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nihul Habayit//Zilcha//HE", "CALSCALE:GREGORIAN", "METHOD:REQUEST",
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nihul Habayit//Family//HE", "CALSCALE:GREGORIAN", "METHOD:REQUEST",
     "BEGIN:VEVENT", `UID:${event.id}@nihul-habayit`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
     ...dateLines, `SUMMARY:${escapeIcs(event.title)}`, `LOCATION:${escapeIcs(event.location || "")}`, `DESCRIPTION:${escapeIcs(event.notes || "")}`,
     "END:VEVENT", "END:VCALENDAR",
@@ -1938,17 +2075,19 @@ authForm?.addEventListener("submit", async (event) => {
   authMessage.textContent = "";
   authSubmit.disabled = true;
   authSubmit.textContent = "נכנסת…";
+  const email = String(authEmail?.value || "").trim().toLowerCase();
   const { error } = await supabaseClient.auth.signInWithPassword({
-    email: APP_CONFIG.sharedLoginEmail.trim(),
+    email,
     password: authPassword.value,
   });
   authSubmit.disabled = false;
   authSubmit.textContent = "כניסה";
-  if (error) authMessage.textContent = "הסיסמה אינה נכונה או שהחיבור עדיין לא הוגדר.";
+  if (error) authMessage.textContent = "האימייל או הסיסמה אינם נכונים.";
 });
 
 signOutButton?.addEventListener("click", async () => {
   if (realtimeChannel) await supabaseClient.removeChannel(realtimeChannel);
+  realtimeChannel = null;
   await supabaseClient.auth.signOut();
 });
 

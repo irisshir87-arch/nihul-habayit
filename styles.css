@@ -1653,3 +1653,10 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
   .compact-event-row .event-title-cell { grid-column: 2; }
   .compact-event-row > .more-menu { grid-column: 3; grid-row: 1; }
 }
+
+
+/* Multi-household login */
+#auth-email {
+  direction: ltr;
+  text-align: left;
+}
