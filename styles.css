@@ -1722,6 +1722,11 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
   background: var(--primary-soft); color: var(--primary); font-size: 12px; font-weight: 900;
 }
 .admin-family-form { display: grid; gap: 16px; }
+.admin-reset-card { padding: 24px; }
+.admin-password-reset-form { display: grid; gap: 14px; max-width: 520px; }
+.admin-password-reset-form input[type="email"] { direction: ltr; text-align: left; }
+.admin-reset-submit { justify-self: start; }
+.admin-form-message.success { color: var(--success, #317a53); }
 .admin-household-name { max-width: 520px; }
 .admin-members-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .admin-members-list { display: grid; gap: 10px; }
@@ -1745,12 +1750,68 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
 .mobile-app-menu-popover #mobile-admin-button:not([hidden]) { border-bottom: 1px solid var(--border); border-radius: 9px 9px 4px 4px; }
 
 @media (max-width: 760px) {
-  .admin-create-card { padding: 16px; }
+  .admin-create-card, .admin-reset-card { padding: 16px; }
   .admin-card-heading { display: grid; gap: 10px; margin-bottom: 18px; }
   .admin-lock-badge { justify-self: start; }
   .admin-member-row { grid-template-columns: minmax(0, 1fr) 38px; }
   .admin-member-row label:first-child { grid-column: 1; }
   .admin-member-row label:nth-child(2) { grid-column: 1; }
   .admin-remove-member { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
-  .admin-submit-button { width: 100%; min-width: 0; }
+  .admin-submit-button, .admin-reset-submit { width: 100%; min-width: 0; }
+}
+
+
+/* V15.17 — חלון "מה חדש" לאחר עדכון גרסה */
+.whats-new-panel {
+  display: grid;
+  gap: 16px;
+}
+.whats-new-intro,
+.whats-new-note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.whats-new-list {
+  display: grid;
+  gap: 10px;
+}
+.whats-new-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f8faff;
+}
+.whats-new-item p {
+  margin: 0;
+  color: var(--text);
+  font-weight: 750;
+  line-height: 1.55;
+}
+.whats-new-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  font-size: 21px;
+}
+.whats-new-note {
+  font-size: 12px;
+}
+@media (max-width: 560px) {
+  .whats-new-item {
+    grid-template-columns: 36px minmax(0, 1fr);
+    padding: 11px 12px;
+  }
+  .whats-new-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 18px;
+  }
 }

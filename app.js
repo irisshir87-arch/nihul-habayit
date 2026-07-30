@@ -8,6 +8,18 @@ const SUPABASE_ENABLED = Boolean(
 );
 const collator = new Intl.Collator("he", { sensitivity: "base", numeric: true });
 
+const APP_RELEASE = Object.freeze({
+  version: "15.17",
+  title: "מה חדש באפליקציה?",
+  updates: [
+    { icon: "🔁", text: "אירועים חוזרים מוצגים עכשיו בכל שבוע, חודש או שנה בהתאם להגדרה." },
+    { icon: "🔗", text: "בעמוד תכנונים אפשר לשמור תכנון גם בלי להוסיף קישור." },
+    { icon: "🔐", text: "במסך ניהול המשפחות אפשר לשלוח למשתמש קישור לאיפוס סיסמה.", adminOnly: true },
+    { icon: "✨", text: "מעתה יוצג חלון קצר עם החידושים בפעם הראשונה לאחר כל עדכון גרסה." },
+  ],
+});
+const WHATS_NEW_STORAGE_PREFIX = "nihul-habayit-whats-new-seen";
+
 const DEFAULT_HOUSEHOLD_MEMBERS = ["איריס", "תומר"];
 const WISH_BASE_CATEGORIES = ["בית", "ילדים", "מתכונים", "אטרקציות"];
 let HOUSEHOLD_MEMBERS = [...DEFAULT_HOUSEHOLD_MEMBERS];
@@ -148,6 +160,8 @@ const signedInUser = document.querySelector("#signed-in-user");
 const syncIndicator = document.querySelector(".sync-indicator");
 let deferredInstallPrompt = null;
 let mobileMenuDocumentListenerAttached = false;
+let whatsNewShownThisSession = false;
+let pendingWhatsNewSeenKey = "";
 
 function isInstalledApp() {
   return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
@@ -408,6 +422,7 @@ function normalizeState(input) {
       }
       event.participants = event.participants.filter((name) => HOUSEHOLD_MEMBERS.includes(name));
       event.allDay = Boolean(event.allDay);
+      event.recurring = ["weekly", "monthly", "yearly"].includes(event.recurring) ? event.recurring : "none";
       if (event.allDay) {
         event.startTime = "";
         event.endTime = "";
@@ -652,7 +667,52 @@ async function resolveHouseholdContext(user) {
   return true;
 }
 
+function whatsNewSeenKey() {
+  const viewerId = currentUser?.id || "local";
+  return `${WHATS_NEW_STORAGE_PREFIX}:${viewerId}`;
+}
+
+function showWhatsNewIfNeeded() {
+  if (whatsNewShownThisSession || !dialog || !appShell || appShell.classList.contains("hidden")) return;
+  const seenKey = whatsNewSeenKey();
+  if (localStorage.getItem(seenKey) === APP_RELEASE.version) return;
+
+  const updates = APP_RELEASE.updates.filter((update) => !update.adminOnly || currentUserIsAdmin);
+  if (!updates.length) return;
+
+  if (dialog.open) dialog.close();
+  whatsNewShownThisSession = true;
+  pendingWhatsNewSeenKey = seenKey;
+  dialogEyebrow.textContent = `גרסה ${APP_RELEASE.version}`;
+  dialogTitle.textContent = APP_RELEASE.title;
+  dialogBody.innerHTML = `
+    <section class="whats-new-panel">
+      <p class="whats-new-intro">ריכזנו עבורך את השינויים האחרונים כדי שיהיה קל להתחיל להשתמש בהם.</p>
+      <div class="whats-new-list">
+        ${updates.map((update) => `
+          <article class="whats-new-item">
+            <span class="whats-new-icon" aria-hidden="true">${update.icon}</span>
+            <p>${escapeHtml(update.text)}</p>
+          </article>`).join("")}
+      </div>
+      <p class="whats-new-note">החלון יוצג פעם אחת בלבד בכל מכשיר לאחר עדכון גרסה.</p>
+    </section>`;
+  dialogSubmit.hidden = false;
+  dialogSubmit.textContent = "הבנתי, אפשר להמשיך";
+  dialogForm.onsubmit = (event) => {
+    event.preventDefault();
+    dialog.close();
+  };
+  dialog.showModal();
+}
+
+function scheduleWhatsNew() {
+  window.setTimeout(showWhatsNewIfNeeded, 180);
+}
+
 function showLogin(message = "") {
+  whatsNewShownThisSession = false;
+  pendingWhatsNewSeenKey = "";
   currentUser = null;
   cloudStartedForUserId = null;
   currentHouseholdId = "";
@@ -695,6 +755,7 @@ async function startCloudApp(user) {
       setSyncStatus("מצב ניהול");
       updateHouseholdUi();
       render();
+      scheduleWhatsNew();
       return;
     }
 
@@ -703,6 +764,7 @@ async function startCloudApp(user) {
     updateHouseholdUi();
     subscribeToCloudState();
     render();
+    scheduleWhatsNew();
   } catch (error) {
     console.error("Could not start cloud app", error);
     if (realtimeChannel) await supabaseClient.removeChannel(realtimeChannel);
@@ -721,6 +783,7 @@ async function initializeApp() {
     mobileNav.classList.remove("hidden");
     setSyncStatus("נשמר מקומית");
     render();
+    scheduleWhatsNew();
     return;
   }
 
@@ -976,11 +1039,48 @@ function israelHolidayForDate(date) {
   };
 }
 
+function dateSerialFromKey(key) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ""));
+  if (!match) return null;
+  return Math.floor(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86400000);
+}
+
+function eventOccursOnDate(event, key) {
+  const startKey = String(event?.date || "");
+  if (!startKey || !key) return false;
+  if (startKey === key) return true;
+
+  const recurrence = String(event.recurring || "none");
+  if (recurrence === "none") return false;
+
+  const startSerial = dateSerialFromKey(startKey);
+  const targetSerial = dateSerialFromKey(key);
+  if (startSerial === null || targetSerial === null || targetSerial < startSerial) return false;
+
+  if (recurrence === "weekly") return (targetSerial - startSerial) % 7 === 0;
+
+  const [startYear, startMonth, startDay] = startKey.split("-").map(Number);
+  const [targetYear, targetMonth, targetDay] = key.split("-").map(Number);
+  if (recurrence === "monthly") return targetDay === startDay;
+  if (recurrence === "yearly") return targetMonth === startMonth && targetDay === startDay;
+  return false;
+}
+
+function eventOccurrenceForDate(event, key) {
+  return {
+    ...event,
+    date: key,
+    sourceEventId: event.id,
+    isRecurringOccurrence: key !== event.date,
+  };
+}
+
 function calendarEntriesForDate(key) {
   const date = new Date(`${key}T12:00:00`);
   const holiday = israelHolidayForDate(date);
   const events = state.events
-    .filter((event) => event.date === key)
+    .filter((event) => eventOccursOnDate(event, key))
+    .map((event) => eventOccurrenceForDate(event, key))
     .sort((a, b) => `${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
   return holiday ? [holiday, ...events] : events;
 }
@@ -1024,6 +1124,20 @@ function renderAdminFamilies() {
         <button type="button" class="secondary-button admin-add-member" data-add-admin-member>＋ הוספת משתמש נוסף</button>
         <div id="admin-form-message" class="admin-form-message" role="alert"></div>
         <button id="create-family-submit" type="submit" class="primary-button admin-submit-button">פתיחת משפחה ושליחת הזמנות</button>
+      </form>
+    </section>
+
+    <section class="card admin-reset-card">
+      <div class="admin-card-heading">
+        <div><h3 class="card-title">איפוס סיסמה למשתמש</h3><p class="muted">הזיני את כתובת האימייל של המשתמש. הוא יקבל קישור מאובטח לבחירת סיסמה חדשה.</p></div>
+        <span class="admin-lock-badge">🔒 למנהלת בלבד</span>
+      </div>
+      <form id="admin-password-reset-form" class="admin-password-reset-form">
+        <label>אימייל המשתמש
+          <input id="admin-reset-email" type="email" maxlength="254" placeholder="name@example.com" inputmode="email" autocomplete="email" required />
+        </label>
+        <div id="admin-reset-message" class="admin-form-message" role="alert"></div>
+        <button id="admin-reset-submit" type="submit" class="secondary-button admin-reset-submit">שליחת קישור לאיפוס סיסמה</button>
       </form>
     </section>
   </section>`;
@@ -1093,6 +1207,46 @@ async function submitCreateFamily(event) {
     message.textContent = error instanceof Error ? error.message : "פתיחת המשפחה נכשלה.";
     submit.disabled = false;
     submit.textContent = "פתיחת משפחה ושליחת הזמנות";
+  }
+}
+
+async function submitAdminPasswordReset(event) {
+  event.preventDefault();
+  if (!currentUserIsAdmin || !supabaseClient) {
+    showToast("אין הרשאת ניהול");
+    return;
+  }
+
+  const form = event.currentTarget;
+  const emailInput = form.querySelector("#admin-reset-email");
+  const message = form.querySelector("#admin-reset-message");
+  const submit = form.querySelector("#admin-reset-submit");
+  const email = String(emailInput?.value || "").trim().toLowerCase();
+
+  message.textContent = "";
+  if (!email || !emailInput.checkValidity()) {
+    message.textContent = "יש להזין כתובת אימייל תקינה.";
+    emailInput?.focus();
+    return;
+  }
+
+  submit.disabled = true;
+  submit.textContent = "שולחת קישור…";
+  try {
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
+    if (error) throw error;
+    form.reset();
+    message.classList.add("success");
+    message.textContent = `קישור לאיפוס סיסמה נשלח אל ${email}.`;
+    showToast("מייל איפוס הסיסמה נשלח");
+  } catch (error) {
+    console.error("Could not send password reset", error);
+    message.classList.remove("success");
+    message.textContent = error instanceof Error ? error.message : "שליחת קישור האיפוס נכשלה.";
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "שליחת קישור לאיפוס סיסמה";
   }
 }
 
@@ -1729,6 +1883,7 @@ function emptyHtml(message) {
 function attachScreenEvents() {
   document.querySelectorAll("[data-nav]").forEach((button) => button.addEventListener("click", () => navigate(button.dataset.nav)));
   document.querySelector("#create-family-form")?.addEventListener("submit", submitCreateFamily);
+  document.querySelector("#admin-password-reset-form")?.addEventListener("submit", submitAdminPasswordReset);
   document.querySelector("[data-add-admin-member]")?.addEventListener("click", addAdminMemberRow);
   attachAdminMemberRemoveEvents();
   document.querySelectorAll("[data-add]").forEach((button) => button.addEventListener("click", () => openAddDialog(button.dataset.add)));
@@ -2269,14 +2424,13 @@ function wishFormHtml(item = null) {
   return `<div class="form-stack">
     <label>שם התכנון<input name="title" required autofocus value="${escapeHtml(item?.title || "")}" /></label>
     <label>קטגוריה<select name="category">${wishCategoryOptions(item?.category || (wishCategoryFilter === "הכל" ? "בית" : wishCategoryFilter))}</select></label>
-    <label>קישורים<textarea name="references" required placeholder="קישור אחד בכל שורה">${escapeHtml(referencesToText(item?.references || []))}</textarea></label>
+    <label>קישורים אופציונליים<textarea name="references" placeholder="קישור אחד בכל שורה (לא חובה)">${escapeHtml(referencesToText(item?.references || []))}</textarea></label>
     <label>הערה אופציונלית<textarea name="note">${escapeHtml(item?.note || "")}</textarea></label>
   </div>`;
 }
 
 function submitWish(formData, id = null) {
   const references = parseReferences(formData.get("references"));
-  if (!references.length) return showToast("יש להוסיף לפחות קישור אחד");
   if (references.some((reference) => !isValidWebLink(reference))) return showToast("יש להזין קישורים תקינים שמתחילים ב־https://");
   const values = {
     title: String(formData.get("title") || "").trim(),
@@ -2348,7 +2502,9 @@ function downloadICS(eventId) {
   const ics = [
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nihul Habayit//Family//HE", "CALSCALE:GREGORIAN", "METHOD:REQUEST",
     "BEGIN:VEVENT", `UID:${event.id}@nihul-habayit`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
-    ...dateLines, `SUMMARY:${escapeIcs(event.title)}`, `LOCATION:${escapeIcs(event.location || "")}`, `DESCRIPTION:${escapeIcs(event.notes || "")}`,
+    ...dateLines,
+    ...({ weekly: ["RRULE:FREQ=WEEKLY"], monthly: ["RRULE:FREQ=MONTHLY"], yearly: ["RRULE:FREQ=YEARLY"] }[event.recurring] || []),
+    `SUMMARY:${escapeIcs(event.title)}`, `LOCATION:${escapeIcs(event.location || "")}`, `DESCRIPTION:${escapeIcs(event.notes || "")}`,
     "END:VEVENT", "END:VCALENDAR",
   ].join("\r\n");
   const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
@@ -2371,6 +2527,12 @@ function resetDemo() {
   saveState("נתוני הדוגמה שוחזרו");
   render();
 }
+
+dialog?.addEventListener("close", () => {
+  if (!pendingWhatsNewSeenKey) return;
+  localStorage.setItem(pendingWhatsNewSeenKey, APP_RELEASE.version);
+  pendingWhatsNewSeenKey = "";
+});
 
 document.querySelectorAll("[data-close-dialog]").forEach((button) => button.addEventListener("click", () => dialog.close()));
 document.querySelector("#reset-demo").addEventListener("click", resetDemo);
