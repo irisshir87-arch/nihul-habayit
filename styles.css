@@ -1815,3 +1815,59 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
     font-size: 18px;
   }
 }
+
+
+/* V15.18 — ביטול מופע חוזר ועדכוני גרסה מצטברים */
+.calendar-day-dialog-event {
+  display: grid;
+  gap: 8px;
+}
+.calendar-day-event-main { min-width: 0; }
+.calendar-day-event-actions {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 7px;
+  border-top: 1px solid #edf0f5;
+}
+.danger-link-button {
+  border: 0;
+  background: transparent;
+  color: var(--danger, #b42318);
+  padding: 2px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.recurring-cancel-panel {
+  display: grid;
+  gap: 16px;
+}
+.recurring-cancel-panel > p { margin: 0; line-height: 1.65; }
+.recurring-cancel-actions {
+  display: grid;
+  gap: 10px;
+}
+.recurring-cancel-actions button {
+  width: 100%;
+  min-height: 46px;
+  justify-content: center;
+}
+.whats-new-release-list {
+  display: grid;
+  gap: 18px;
+}
+.whats-new-release-group {
+  display: grid;
+  gap: 9px;
+}
+.whats-new-release-group h4 {
+  margin: 0;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 900;
+}
+@media (max-width: 560px) {
+  .calendar-day-event-actions { justify-content: stretch; }
+  .danger-link-button { min-height: 34px; width: 100%; text-align: right; }
+}

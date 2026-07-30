@@ -8,15 +8,43 @@ const SUPABASE_ENABLED = Boolean(
 );
 const collator = new Intl.Collator("he", { sensitivity: "base", numeric: true });
 
+const APP_RELEASES = Object.freeze([
+  {
+    version: "15.14",
+    updates: [
+      { icon: "🔗", text: "בעמוד תכנונים אפשר לשמור תכנון גם בלי להוסיף קישור." },
+    ],
+  },
+  {
+    version: "15.15",
+    updates: [
+      { icon: "🔁", text: "אירועים חוזרים מוצגים בכל שבוע, חודש או שנה בהתאם להגדרה." },
+    ],
+  },
+  {
+    version: "15.16",
+    updates: [
+      { icon: "🔐", text: "במסך ניהול המשפחות אפשר לשלוח למשתמש קישור לאיפוס סיסמה.", adminOnly: true },
+    ],
+  },
+  {
+    version: "15.17",
+    updates: [
+      { icon: "✨", text: "נוסף חלון קצר שמציג מה חדש לאחר עדכון גרסה." },
+    ],
+  },
+  {
+    version: "15.18",
+    updates: [
+      { icon: "🗓️", text: "בביטול אירוע חוזר אפשר לבחור בין ביטול המועד המסוים לבין ביטול כל הסדרה." },
+      { icon: "📚", text: "עדכוני הגרסה מוצגים במצטבר, כך שיופיעו כל החידושים שלא נצפו עדיין." },
+      { icon: "🏠", text: "שם האפליקציה עודכן ל„ניהול הבית” ואינו מציג עוד שם של משפחה אחרת." },
+    ],
+  },
+]);
 const APP_RELEASE = Object.freeze({
-  version: "15.17",
+  ...APP_RELEASES[APP_RELEASES.length - 1],
   title: "מה חדש באפליקציה?",
-  updates: [
-    { icon: "🔁", text: "אירועים חוזרים מוצגים עכשיו בכל שבוע, חודש או שנה בהתאם להגדרה." },
-    { icon: "🔗", text: "בעמוד תכנונים אפשר לשמור תכנון גם בלי להוסיף קישור." },
-    { icon: "🔐", text: "במסך ניהול המשפחות אפשר לשלוח למשתמש קישור לאיפוס סיסמה.", adminOnly: true },
-    { icon: "✨", text: "מעתה יוצג חלון קצר עם החידושים בפעם הראשונה לאחר כל עדכון גרסה." },
-  ],
 });
 const WHATS_NEW_STORAGE_PREFIX = "nihul-habayit-whats-new-seen";
 
@@ -423,6 +451,9 @@ function normalizeState(input) {
       event.participants = event.participants.filter((name) => HOUSEHOLD_MEMBERS.includes(name));
       event.allDay = Boolean(event.allDay);
       event.recurring = ["weekly", "monthly", "yearly"].includes(event.recurring) ? event.recurring : "none";
+      event.excludedDates = [...new Set((Array.isArray(event.excludedDates) ? event.excludedDates : [])
+        .map((date) => String(date || "").trim())
+        .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
       if (event.allDay) {
         event.startTime = "";
         event.endTime = "";
@@ -672,30 +703,68 @@ function whatsNewSeenKey() {
   return `${WHATS_NEW_STORAGE_PREFIX}:${viewerId}`;
 }
 
+function versionParts(version) {
+  return String(version || "")
+    .match(/\d+/g)?.map(Number) || [];
+}
+
+function compareVersions(first, second) {
+  const left = versionParts(first);
+  const right = versionParts(second);
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (left[index] || 0) - (right[index] || 0);
+    if (difference) return difference;
+  }
+  return 0;
+}
+
+function unseenReleaseGroups(lastSeenVersion) {
+  return APP_RELEASES
+    .filter((release) => !lastSeenVersion || compareVersions(release.version, lastSeenVersion) > 0)
+    .map((release) => ({
+      ...release,
+      updates: release.updates.filter((update) => !update.adminOnly || currentUserIsAdmin),
+    }))
+    .filter((release) => release.updates.length);
+}
+
 function showWhatsNewIfNeeded() {
   if (whatsNewShownThisSession || !dialog || !appShell || appShell.classList.contains("hidden")) return;
   const seenKey = whatsNewSeenKey();
-  if (localStorage.getItem(seenKey) === APP_RELEASE.version) return;
+  const lastSeenVersion = localStorage.getItem(seenKey) || "";
+  if (lastSeenVersion && compareVersions(lastSeenVersion, APP_RELEASE.version) >= 0) return;
 
-  const updates = APP_RELEASE.updates.filter((update) => !update.adminOnly || currentUserIsAdmin);
-  if (!updates.length) return;
+  const releaseGroups = unseenReleaseGroups(lastSeenVersion);
+  if (!releaseGroups.length) {
+    localStorage.setItem(seenKey, APP_RELEASE.version);
+    return;
+  }
 
   if (dialog.open) dialog.close();
   whatsNewShownThisSession = true;
   pendingWhatsNewSeenKey = seenKey;
-  dialogEyebrow.textContent = `גרסה ${APP_RELEASE.version}`;
+  dialogEyebrow.textContent = lastSeenVersion ? "עדכונים מאז הפעם האחרונה" : `גרסה ${APP_RELEASE.version}`;
   dialogTitle.textContent = APP_RELEASE.title;
   dialogBody.innerHTML = `
     <section class="whats-new-panel">
-      <p class="whats-new-intro">ריכזנו עבורך את השינויים האחרונים כדי שיהיה קל להתחיל להשתמש בהם.</p>
-      <div class="whats-new-list">
-        ${updates.map((update) => `
-          <article class="whats-new-item">
-            <span class="whats-new-icon" aria-hidden="true">${update.icon}</span>
-            <p>${escapeHtml(update.text)}</p>
-          </article>`).join("")}
+      <p class="whats-new-intro">${lastSeenVersion
+        ? "ריכזנו את כל החידושים שעלו מאז הפעם האחרונה שפתחת את האפליקציה."
+        : "ריכזנו עבורך את החידושים האחרונים כדי שיהיה קל להתחיל להשתמש בהם."}</p>
+      <div class="whats-new-release-list">
+        ${releaseGroups.map((release) => `
+          <section class="whats-new-release-group">
+            <h4>גרסה ${escapeHtml(release.version)}</h4>
+            <div class="whats-new-list">
+              ${release.updates.map((update) => `
+                <article class="whats-new-item">
+                  <span class="whats-new-icon" aria-hidden="true">${update.icon}</span>
+                  <p>${escapeHtml(update.text)}</p>
+                </article>`).join("")}
+            </div>
+          </section>`).join("")}
       </div>
-      <p class="whats-new-note">החלון יוצג פעם אחת בלבד בכל מכשיר לאחר עדכון גרסה.</p>
+      <p class="whats-new-note">לאחר האישור, החידושים האלה יסומנו כנקראו במכשיר הזה.</p>
     </section>`;
   dialogSubmit.hidden = false;
   dialogSubmit.textContent = "הבנתי, אפשר להמשיך";
@@ -1048,6 +1117,7 @@ function dateSerialFromKey(key) {
 function eventOccursOnDate(event, key) {
   const startKey = String(event?.date || "");
   if (!startKey || !key) return false;
+  if ((Array.isArray(event.excludedDates) ? event.excludedDates : []).includes(key)) return false;
   if (startKey === key) return true;
 
   const recurrence = String(event.recurring || "none");
@@ -1344,9 +1414,15 @@ function openCalendarDay(key) {
   dialogBody.innerHTML = entries.length
     ? `<div class="calendar-day-dialog-list">${entries.map((event) => {
         const when = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
-        return `<article class="calendar-day-dialog-event ${event.isHoliday ? "holiday" : ""}"><div><strong>${escapeHtml(event.title)}</strong><span>${when}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</span></div>${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}</article>`;
+        const actions = event.isHoliday ? "" : `<div class="calendar-day-event-actions">
+          <button type="button" class="danger-link-button" data-cancel-event-occurrence="${escapeHtml(event.sourceEventId || event.id)}" data-occurrence-date="${escapeHtml(event.date)}">ביטול האירוע</button>
+        </div>`;
+        return `<article class="calendar-day-dialog-event ${event.isHoliday ? "holiday" : ""}"><div class="calendar-day-event-main"><strong>${escapeHtml(event.title)}</strong><span>${when}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</span></div>${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}${actions}</article>`;
       }).join("")}</div>`
     : emptyHtml("אין אירועים ביום זה");
+  dialogBody.querySelectorAll("[data-cancel-event-occurrence]").forEach((button) => button.addEventListener("click", () => {
+    openEventCancellationDialog(button.dataset.cancelEventOccurrence, button.dataset.occurrenceDate);
+  }));
   dialog.showModal();
 }
 
@@ -1590,7 +1666,7 @@ function eventFullHtml(event) {
   return `<div class="compact-event-row event-summary-row" data-view-event="${event.id}" role="button" tabindex="0" aria-label="פתיחת פרטי האירוע ${escapeHtml(event.title)}">
     <div class="compact-event-date"><strong>${date.getDate()}</strong><span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(date)}</span></div>
     <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}</div></div>
-    ${moreMenuHtml(`<button type="button" data-edit-event="${event.id}">עריכה</button><button type="button" data-download-ics="${event.id}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${event.id}">מחיקה</button>`)}
+    ${moreMenuHtml(`<button type="button" data-edit-event="${event.id}">עריכה</button><button type="button" data-download-ics="${event.id}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${event.id}">ביטול אירוע</button>`)}
   </div>`;
 }
 
@@ -1934,7 +2010,11 @@ function attachScreenEvents() {
     });
   });
   document.querySelectorAll("[data-edit-event]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); openEditDialog("events", button.dataset.editEvent); }));
-  document.querySelectorAll("[data-delete-event]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); deleteFrom("events", button.dataset.deleteEvent); }));
+  document.querySelectorAll("[data-delete-event]").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const calendarEvent = state.events.find((item) => item.id === button.dataset.deleteEvent);
+    openEventCancellationDialog(button.dataset.deleteEvent, calendarEvent?.date || "");
+  }));
   document.querySelectorAll("[data-download-ics]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); downloadICS(button.dataset.downloadIcs); }));
 
   document.querySelectorAll("[data-task-toggle]").forEach((button) => button.addEventListener("click", () => toggleTask(button.dataset.taskToggle)));
@@ -2203,6 +2283,62 @@ function updateArchiveActionButtons() {
   if (deleteButton) deleteButton.disabled = !hasSelection;
 }
 
+function removeEventSeries(eventId) {
+  const event = state.events.find((existing) => existing.id === eventId);
+  if (!event) return;
+  state.events = state.events.filter((existing) => existing.id !== eventId);
+  saveState(event.recurring && event.recurring !== "none" ? "סדרת האירועים בוטלה" : "האירוע בוטל");
+  if (dialog.open) dialog.close();
+  render();
+}
+
+function cancelSingleEventOccurrence(eventId, occurrenceDate) {
+  const event = state.events.find((existing) => existing.id === eventId);
+  if (!event || !eventOccursOnDate(event, occurrenceDate)) return;
+  event.excludedDates = [...new Set([...(event.excludedDates || []), occurrenceDate])].sort();
+  saveState("המועד הזה בוטל ושאר הסדרה נשמרה");
+  if (dialog.open) dialog.close();
+  render();
+}
+
+function openEventCancellationDialog(eventId, occurrenceDate = "") {
+  const event = state.events.find((existing) => existing.id === eventId);
+  if (!event) return;
+  const recurring = event.recurring && event.recurring !== "none";
+  const selectedDate = occurrenceDate || event.date;
+
+  if (!recurring) {
+    if (!confirm(`לבטל את האירוע „${event.title}”?`)) return;
+    removeEventSeries(eventId);
+    return;
+  }
+
+  const date = new Date(`${selectedDate}T12:00:00`);
+  const readableDate = Number.isNaN(date.getTime())
+    ? selectedDate
+    : new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "long", year: "numeric" }).format(date);
+
+  if (dialog.open) dialog.close();
+  dialogEyebrow.textContent = "אירוע חוזר";
+  dialogTitle.textContent = "איזה אירוע לבטל?";
+  dialogSubmit.hidden = true;
+  dialogForm.onsubmit = null;
+  dialogBody.innerHTML = `<section class="recurring-cancel-panel">
+    <p>האירוע „${escapeHtml(event.title)}” מוגדר כאירוע חוזר.</p>
+    <div class="recurring-cancel-actions">
+      <button type="button" class="secondary-button" data-cancel-one-occurrence>רק בתאריך ${escapeHtml(readableDate)}</button>
+      <button type="button" class="danger-button" data-cancel-entire-series>כל סדרת האירועים</button>
+    </div>
+    <p class="muted small">ביטול מועד אחד לא ישפיע על שאר המועדים בסדרה.</p>
+  </section>`;
+  dialogBody.querySelector("[data-cancel-one-occurrence]")?.addEventListener("click", () => cancelSingleEventOccurrence(eventId, selectedDate));
+  dialogBody.querySelector("[data-cancel-entire-series]")?.addEventListener("click", () => {
+    if (!confirm(`לבטל את כל סדרת האירועים „${event.title}”?`)) return;
+    removeEventSeries(eventId);
+  });
+  dialog.showModal();
+}
+
 function deleteFrom(collection, id) {
   if (!confirm("למחוק את הפריט?")) return;
   state[collection] = state[collection].filter((item) => item.id !== id);
@@ -2361,8 +2497,14 @@ function submitEvent(formData, id = null) {
     startTime: allDay ? "" : formData.get("startTime"), endTime: allDay ? "" : formData.get("endTime"),
     location: String(formData.get("location") || "").trim(), notes: String(formData.get("notes") || "").trim(), recurring: formData.get("recurring"),
   };
-  if (id) Object.assign(state.events.find((event) => event.id === id), values);
-  else state.events.push({ id: crypto.randomUUID(), ...values });
+  if (id) {
+    const existingEvent = state.events.find((event) => event.id === id);
+    if (!existingEvent) return;
+    Object.assign(existingEvent, values);
+    existingEvent.excludedDates = Array.isArray(existingEvent.excludedDates) ? existingEvent.excludedDates : [];
+  } else {
+    state.events.push({ id: crypto.randomUUID(), ...values, excludedDates: [] });
+  }
   saveState(id ? "האירוע עודכן" : "האירוע נוסף");
   dialog.close();
   render();
@@ -2499,11 +2641,18 @@ function downloadICS(eventId) {
     const endTime = event.endTime || startTime;
     dateLines = [`DTSTART:${dateOnly}T${startTime.replace(":", "")}00`, `DTEND:${dateOnly}T${endTime.replace(":", "")}00`];
   }
+  const excludedDates = (Array.isArray(event.excludedDates) ? event.excludedDates : [])
+    .map((date) => date.replaceAll("-", ""))
+    .filter(Boolean);
+  const exclusionLines = !excludedDates.length ? [] : event.allDay
+    ? [`EXDATE;VALUE=DATE:${excludedDates.join(",")}`]
+    : [`EXDATE:${excludedDates.map((date) => `${date}T${(event.startTime || "00:00").replace(":", "")}00`).join(",")}`];
   const ics = [
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Nihul Habayit//Family//HE", "CALSCALE:GREGORIAN", "METHOD:REQUEST",
     "BEGIN:VEVENT", `UID:${event.id}@nihul-habayit`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").split(".")[0]}Z`,
     ...dateLines,
     ...({ weekly: ["RRULE:FREQ=WEEKLY"], monthly: ["RRULE:FREQ=MONTHLY"], yearly: ["RRULE:FREQ=YEARLY"] }[event.recurring] || []),
+    ...exclusionLines,
     `SUMMARY:${escapeIcs(event.title)}`, `LOCATION:${escapeIcs(event.location || "")}`, `DESCRIPTION:${escapeIcs(event.notes || "")}`,
     "END:VEVENT", "END:VCALENDAR",
   ].join("\r\n");
