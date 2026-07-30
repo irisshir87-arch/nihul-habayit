@@ -41,12 +41,24 @@ const APP_RELEASES = Object.freeze([
       { icon: "🏠", text: "שם האפליקציה עודכן ל„ניהול הבית” ואינו מציג עוד שם של משפחה אחרת." },
     ],
   },
+  {
+    version: "15.19",
+    updates: [
+      { icon: "🔔", text: "נוספה אפשרות לקבל התראות במכשיר כשבן או בת המשפחה מוסיפים אירוע, סידור או תכנון." },
+      { icon: "🛒", text: "מוצרים חדשים ברשימת הקניות נשלחים כהתראה מרוכזת כדי לא להעמיס." },
+      { icon: "⚙️", text: "אפשר להפעיל או לכבות התראות מתפריט האפליקציה בכל מכשיר בנפרד." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
   title: "מה חדש באפליקציה?",
 });
 const WHATS_NEW_STORAGE_PREFIX = "nihul-habayit-whats-new-seen";
+const PUSH_VAPID_PUBLIC_KEY = "BLCrC64_BfAUfG8NyKmUCY-WCyZPk6tDzk5cPLXur8i4daSv9rSFRkDlNwb1naz6xKUV3GojIGQbVdO35NImXeA";
+const PUSH_FUNCTION_NAME = "send-household-notification";
+const SHOPPING_PUSH_STORAGE_PREFIX = "nihul-habayit-shopping-push";
+const SHOPPING_PUSH_DELAY_MS = 45_000;
 
 const DEFAULT_HOUSEHOLD_MEMBERS = ["איריס", "תומר"];
 const WISH_BASE_CATEGORIES = ["בית", "ילדים", "מתכונים", "אטרקציות"];
@@ -190,6 +202,340 @@ let deferredInstallPrompt = null;
 let mobileMenuDocumentListenerAttached = false;
 let whatsNewShownThisSession = false;
 let pendingWhatsNewSeenKey = "";
+let pushSubscriptionStatus = "unknown";
+let pushActionInProgress = false;
+let shoppingPushTimer = null;
+
+
+function pushNotificationsSupported() {
+  return Boolean(
+    SUPABASE_ENABLED &&
+    currentUser &&
+    currentHouseholdId &&
+    window.isSecureContext &&
+    "Notification" in window &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window
+  );
+}
+
+function pushDeviceLabel() {
+  const ua = navigator.userAgent || "";
+  if (/Android/i.test(ua)) return "Android";
+  if (/iPhone|iPad|iPod/i.test(ua)) return "iPhone / iPad";
+  if (/Windows/i.test(ua)) return "Windows";
+  if (/Macintosh|Mac OS X/i.test(ua)) return "Mac";
+  return "דפדפן";
+}
+
+function urlBase64ToUint8Array(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map((character) => character.charCodeAt(0)));
+}
+
+async function persistPushSubscription(subscription) {
+  if (!subscription || !currentUser || !currentHouseholdId || !supabaseClient) return;
+  const json = subscription.toJSON();
+  const p256dh = json.keys?.p256dh;
+  const authKey = json.keys?.auth;
+  if (!p256dh || !authKey) throw new Error("לא ניתן לקרוא את מפתחות ההתראה מהמכשיר.");
+
+  const { error } = await supabaseClient
+    .from("push_subscriptions")
+    .upsert({
+      household_id: currentHouseholdId,
+      user_id: currentUser.id,
+      endpoint: subscription.endpoint,
+      p256dh,
+      auth_key: authKey,
+      user_agent: navigator.userAgent || "",
+      device_label: pushDeviceLabel(),
+      is_active: true,
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: "user_id,endpoint" });
+  if (error) throw error;
+}
+
+function notificationActionLabel() {
+  if (pushActionInProgress) return "מעדכנת התראות…";
+  if (pushSubscriptionStatus === "active") return "🔕 כיבוי התראות במכשיר";
+  if (pushSubscriptionStatus === "blocked") return "🔕 ההתראות חסומות בדפדפן";
+  return "🔔 הפעלת התראות במכשיר";
+}
+
+function updatePushNotificationControls() {
+  const supported = pushNotificationsSupported();
+  const shouldShow = Boolean(currentHouseholdId && currentUser && SUPABASE_ENABLED);
+  const label = notificationActionLabel();
+  const mobileButton = document.querySelector("#mobile-notification-button");
+  const desktopButton = document.querySelector("#desktop-notification-button");
+  [mobileButton, desktopButton].forEach((button) => {
+    if (!button) return;
+    button.hidden = !shouldShow;
+    button.disabled = pushActionInProgress;
+    button.textContent = supported || pushSubscriptionStatus === "blocked"
+      ? label
+      : "🔕 התראות אינן נתמכות במכשיר";
+  });
+}
+
+function ensureDesktopNotificationAction() {
+  const footer = signOutButton?.parentElement;
+  if (!footer) return;
+  let button = document.querySelector("#desktop-notification-button");
+  if (!button) {
+    button = document.createElement("button");
+    button.id = "desktop-notification-button";
+    button.className = "ghost-button";
+    button.type = "button";
+    button.addEventListener("click", togglePushNotifications);
+    footer.insertBefore(button, signOutButton);
+  }
+  updatePushNotificationControls();
+}
+
+function openPushBlockedHelpDialog() {
+  if (dialog.open) dialog.close();
+  dialogEyebrow.textContent = "התראות";
+  dialogTitle.textContent = "ההתראות חסומות במכשיר";
+  dialogBody.innerHTML = `<div class="install-help">
+    <p>כדי לקבל התראות צריך לאפשר אותן בהגדרות האתר בדפדפן.</p>
+    <ol>
+      <li>פתחו את פרטי האתר או את הגדרות הדפדפן.</li>
+      <li>בחרו <strong>התראות</strong> ושנו ל־<strong>אפשר</strong>.</li>
+      <li>חזרו לאפליקציה ולחצו שוב על הפעלת התראות.</li>
+    </ol>
+  </div>`;
+  dialogSubmit.hidden = true;
+  dialogForm.onsubmit = null;
+  dialog.showModal();
+}
+
+async function refreshPushSubscriptionStatus({ syncExisting = true, rerenderHome = false } = {}) {
+  const previousStatus = pushSubscriptionStatus;
+  if (!pushNotificationsSupported()) {
+    pushSubscriptionStatus = currentHouseholdId ? "unsupported" : "unknown";
+    updatePushNotificationControls();
+    return;
+  }
+  if (Notification.permission === "denied") {
+    pushSubscriptionStatus = "blocked";
+    updatePushNotificationControls();
+  } else if (Notification.permission !== "granted") {
+    pushSubscriptionStatus = "inactive";
+    updatePushNotificationControls();
+  } else {
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      pushSubscriptionStatus = subscription ? "active" : "inactive";
+      if (subscription && syncExisting) await persistPushSubscription(subscription);
+    } catch (error) {
+      console.warn("Could not read push subscription", error);
+      pushSubscriptionStatus = "inactive";
+    }
+    updatePushNotificationControls();
+  }
+  if (rerenderHome && currentScreen === "home" && previousStatus !== pushSubscriptionStatus && state) render();
+}
+
+async function enablePushNotifications() {
+  if (!pushNotificationsSupported()) {
+    showToast("המכשיר או הדפדפן אינם תומכים בהתראות");
+    return;
+  }
+  pushActionInProgress = true;
+  updatePushNotificationControls();
+  try {
+    const permission = Notification.permission === "granted"
+      ? "granted"
+      : await Notification.requestPermission();
+    if (permission !== "granted") {
+      pushSubscriptionStatus = permission === "denied" ? "blocked" : "inactive";
+      if (permission === "denied") openPushBlockedHelpDialog();
+      else showToast("הפעלת ההתראות לא אושרה");
+      return;
+    }
+
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(PUSH_VAPID_PUBLIC_KEY),
+      });
+    }
+    await persistPushSubscription(subscription);
+    pushSubscriptionStatus = "active";
+    showToast("ההתראות הופעלו במכשיר הזה");
+  } catch (error) {
+    console.error("Could not enable push notifications", error);
+    showToast(error instanceof Error ? error.message : "לא ניתן להפעיל התראות");
+  } finally {
+    pushActionInProgress = false;
+    updatePushNotificationControls();
+    if (currentScreen === "home" && state) render();
+  }
+}
+
+async function disablePushNotifications() {
+  if (!pushNotificationsSupported()) return;
+  if (!confirm("לכבות התראות במכשיר הזה?")) return;
+  pushActionInProgress = true;
+  updatePushNotificationControls();
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const subscription = await registration.pushManager.getSubscription();
+    if (subscription) {
+      await supabaseClient
+        .from("push_subscriptions")
+        .update({ is_active: false, last_seen_at: new Date().toISOString() })
+        .eq("user_id", currentUser.id)
+        .eq("endpoint", subscription.endpoint);
+      await subscription.unsubscribe();
+    }
+    pushSubscriptionStatus = "inactive";
+    showToast("ההתראות כובו במכשיר הזה");
+  } catch (error) {
+    console.error("Could not disable push notifications", error);
+    showToast("לא ניתן לכבות את ההתראות כרגע");
+  } finally {
+    pushActionInProgress = false;
+    updatePushNotificationControls();
+    if (currentScreen === "home" && state) render();
+  }
+}
+
+async function togglePushNotifications() {
+  setMobileMenuOpen(false);
+  if (pushSubscriptionStatus === "blocked") {
+    openPushBlockedHelpDialog();
+    return;
+  }
+  if (pushSubscriptionStatus === "active") await disablePushNotifications();
+  else await enablePushNotifications();
+}
+
+function notificationOptInHtml() {
+  if (!currentHouseholdId || !currentUser || !SUPABASE_ENABLED) return "";
+  if (pushSubscriptionStatus === "active" || pushSubscriptionStatus === "unknown" || pushSubscriptionStatus === "unsupported") return "";
+  if (pushSubscriptionStatus === "blocked") {
+    return `<section class="notification-optin-card blocked">
+      <div class="notification-optin-icon">🔕</div>
+      <div><strong>ההתראות חסומות במכשיר</strong><span>אפשר לפתוח אותן דרך הגדרות האתר בדפדפן.</span></div>
+      <button type="button" class="secondary-button compact-button" data-push-help>איך מפעילים?</button>
+    </section>`;
+  }
+  return `<section class="notification-optin-card">
+    <div class="notification-optin-icon">🔔</div>
+    <div><strong>רוצים לקבל עדכונים מהמשפחה?</strong><span>הפעילו התראות במכשיר הזה לאירועים, סידורים ותכנונים חשובים.</span></div>
+    <button type="button" class="primary-button compact-button" data-enable-push>הפעלת התראות</button>
+  </section>`;
+}
+
+async function sendHouseholdNotification(payload, { showNoRecipients = false } = {}) {
+  if (!SUPABASE_ENABLED || !supabaseClient || !currentUser || !currentHouseholdId) return null;
+  try {
+    const { data, error } = await supabaseClient.functions.invoke(PUSH_FUNCTION_NAME, {
+      body: {
+        householdId: currentHouseholdId,
+        kind: payload.kind,
+        title: payload.title,
+        body: payload.body,
+        targetPage: payload.targetPage || "home",
+        entityId: payload.entityId || null,
+        dedupeKey: payload.dedupeKey || null,
+        metadata: payload.metadata || {},
+      },
+    });
+    if (error) throw error;
+    if (showNoRecipients && data?.noRecipients) {
+      showToast("נשמר. המשתמש השני עדיין לא הפעיל התראות במכשיר שלו");
+    } else if (showNoRecipients && Number(data?.failed || 0) > 0 && !Number(data?.sent || 0)) {
+      showToast("נשמר, אך שליחת ההתראה לא הצליחה");
+    }
+    return data;
+  } catch (error) {
+    console.warn("Could not send household notification", error);
+    if (showNoRecipients) showToast("הפריט נשמר, אך ההתראה לא נשלחה");
+    return null;
+  }
+}
+
+function notificationChoiceHtml({ checked = false, text = "שליחת התראה לבן או בת המשפחה" } = {}) {
+  if (!SUPABASE_ENABLED || !currentHouseholdId || !currentUser) return "";
+  return `<label class="notification-choice">
+    <span class="notification-choice-icon" aria-hidden="true">🔔</span>
+    <span class="notification-choice-copy"><strong>${escapeHtml(text)}</strong><small>ההתראה תישלח רק למכשירים אחרים במשפחה שאישרו קבלת התראות.</small></span>
+    <input name="sendNotification" type="checkbox" ${checked ? "checked" : ""} />
+  </label>`;
+}
+
+function shoppingPushStorageKey() {
+  return `${SHOPPING_PUSH_STORAGE_PREFIX}:${currentUser?.id || "local"}:${currentHouseholdId || "none"}`;
+}
+
+function scheduleShoppingPushFlush(delay = SHOPPING_PUSH_DELAY_MS) {
+  clearTimeout(shoppingPushTimer);
+  shoppingPushTimer = setTimeout(() => {
+    flushShoppingPushNotification().catch((error) => console.warn("Could not flush shopping notification", error));
+  }, Math.max(1_500, delay));
+}
+
+function queueShoppingPushNotification(itemName) {
+  if (!SUPABASE_ENABLED || !currentUser || !currentHouseholdId) return;
+  const key = shoppingPushStorageKey();
+  let buffer = { count: 0, names: [], updatedAt: Date.now() };
+  try {
+    const stored = JSON.parse(localStorage.getItem(key) || "null");
+    if (stored && typeof stored === "object") buffer = stored;
+  } catch (error) { /* start a fresh buffer */ }
+  buffer.count = Math.max(0, Number(buffer.count) || 0) + 1;
+  buffer.names = [...new Set([...(Array.isArray(buffer.names) ? buffer.names : []), String(itemName || "").trim()].filter(Boolean))].slice(0, 3);
+  buffer.updatedAt = Date.now();
+  localStorage.setItem(key, JSON.stringify(buffer));
+  scheduleShoppingPushFlush();
+}
+
+async function flushShoppingPushNotification() {
+  clearTimeout(shoppingPushTimer);
+  shoppingPushTimer = null;
+  if (!SUPABASE_ENABLED || !currentUser || !currentHouseholdId) return;
+  const key = shoppingPushStorageKey();
+  let buffer;
+  try {
+    buffer = JSON.parse(localStorage.getItem(key) || "null");
+  } catch (error) {
+    localStorage.removeItem(key);
+    return;
+  }
+  if (!buffer?.count) return;
+  localStorage.removeItem(key);
+  const count = Math.max(1, Number(buffer.count) || 1);
+  const names = Array.isArray(buffer.names) ? buffer.names.filter(Boolean) : [];
+  const body = count === 1
+    ? `נוסף מוצר לרשימת הקניות${names[0] ? `: ${names[0]}` : ""}`
+    : `נוספו ${count} מוצרים לרשימת הקניות${names.length ? `: ${names.join(", ")}${count > names.length ? " ועוד" : ""}` : ""}`;
+  await sendHouseholdNotification({
+    kind: "shopping",
+    title: "רשימת הקניות עודכנה",
+    body,
+    targetPage: "shopping",
+    dedupeKey: `shopping:${currentHouseholdId}:${Math.floor(Date.now() / SHOPPING_PUSH_DELAY_MS)}`,
+  });
+}
+
+function resumeShoppingPushBuffer() {
+  if (!SUPABASE_ENABLED || !currentUser || !currentHouseholdId) return;
+  try {
+    const buffer = JSON.parse(localStorage.getItem(shoppingPushStorageKey()) || "null");
+    if (!buffer?.count) return;
+    const elapsed = Date.now() - Number(buffer.updatedAt || Date.now());
+    scheduleShoppingPushFlush(Math.max(1_500, SHOPPING_PUSH_DELAY_MS - elapsed));
+  } catch (error) { /* ignore invalid local buffer */ }
+}
 
 function isInstalledApp() {
   return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true;
@@ -273,6 +619,7 @@ function ensureMobileTopbarMenu() {
         aria-label="אפשרויות" aria-haspopup="menu" aria-expanded="false">⋮</button>
       <div id="mobile-app-menu-popover" class="mobile-app-menu-popover" role="menu" hidden>
         <button id="mobile-admin-button" type="button" role="menuitem" hidden>ניהול משפחות</button>
+        <button id="mobile-notification-button" type="button" role="menuitem" hidden>🔔 הפעלת התראות במכשיר</button>
         <button id="mobile-install-button" type="button" role="menuitem">＋ הוספה למסך הבית</button>
         <button id="mobile-sign-out-button" type="button" role="menuitem">יציאה</button>
       </div>`;
@@ -287,6 +634,7 @@ function ensureMobileTopbarMenu() {
       setMobileMenuOpen(false);
       navigate("admin");
     });
+    wrapper.querySelector("#mobile-notification-button")?.addEventListener("click", togglePushNotifications);
     wrapper.querySelector("#mobile-install-button")?.addEventListener("click", requestAppInstall);
     wrapper.querySelector("#mobile-sign-out-button")?.addEventListener("click", signOutCurrentUser);
   }
@@ -302,6 +650,7 @@ function ensureMobileTopbarMenu() {
   }
   updateMobileInstallAction();
   updateMobileAdminAction();
+  updatePushNotificationControls();
 }
 
 window.addEventListener("beforeinstallprompt", (event) => {
@@ -336,6 +685,7 @@ function prepareMultiHouseholdUi() {
   const demoResetButton = document.querySelector("#reset-demo");
   if (demoResetButton && SUPABASE_ENABLED) demoResetButton.hidden = true;
   ensureMobileTopbarMenu();
+  ensureDesktopNotificationAction();
 }
 
 function updateHouseholdUi() {
@@ -352,6 +702,7 @@ function updateHouseholdUi() {
       : (currentMemberName ? `${householdLabel} · ${currentMemberName}` : householdLabel);
   }
   updateMobileAdminAction();
+  updatePushNotificationControls();
 }
 
 function householdStorageKey() {
@@ -789,6 +1140,10 @@ function showLogin(message = "") {
   currentMemberName = "";
   currentUserIsAdmin = false;
   adminCreateResult = null;
+  pushSubscriptionStatus = "unknown";
+  pushActionInProgress = false;
+  clearTimeout(shoppingPushTimer);
+  shoppingPushTimer = null;
   configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
   prepareMultiHouseholdUi();
   setMobileMenuOpen(false);
@@ -833,6 +1188,8 @@ async function startCloudApp(user) {
     updateHouseholdUi();
     subscribeToCloudState();
     render();
+    refreshPushSubscriptionStatus({ syncExisting: true, rerenderHome: true }).catch(console.warn);
+    resumeShoppingPushBuffer();
     scheduleWhatsNew();
   } catch (error) {
     console.error("Could not start cloud app", error);
@@ -1331,6 +1688,7 @@ function renderHome() {
   const month = calendarViewDate.getMonth();
   const monthTitle = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(calendarViewDate);
   return `
+    ${notificationOptInHtml()}
     <section class="card home-calendar-card">
       <div class="calendar-toolbar">
         <button type="button" class="calendar-nav-button" data-calendar-prev aria-label="החודש הקודם">›</button>
@@ -1961,6 +2319,8 @@ function attachScreenEvents() {
   document.querySelector("#create-family-form")?.addEventListener("submit", submitCreateFamily);
   document.querySelector("#admin-password-reset-form")?.addEventListener("submit", submitAdminPasswordReset);
   document.querySelector("[data-add-admin-member]")?.addEventListener("click", addAdminMemberRow);
+  document.querySelector("[data-enable-push]")?.addEventListener("click", enablePushNotifications);
+  document.querySelector("[data-push-help]")?.addEventListener("click", openPushBlockedHelpDialog);
   attachAdminMemberRemoveEvents();
   document.querySelectorAll("[data-add]").forEach((button) => button.addEventListener("click", () => openAddDialog(button.dataset.add)));
   document.querySelectorAll("[data-home-shopping-category]").forEach((button) => button.addEventListener("click", () => {
@@ -2447,11 +2807,12 @@ function submitShopping(formData, force = false) {
   if (duplicate && !force) {
     const container = document.querySelector("#duplicate-container");
     container.innerHTML = `<div class="duplicate-warning"><strong>המוצר כבר נמצא ברשימת הקניות.</strong><div class="toolbar" style="margin:10px 0 0"><button type="button" class="primary-button" id="force-add">הוסף בכל זאת</button><button type="button" class="secondary-button" id="cancel-duplicate">לא להוסיף</button></div></div>`;
-    container.querySelector("#force-add").onclick = () => { state.shopping.push(item); saveState("המוצר נוסף למרות הכפילות"); dialog.close(); render(); };
+    container.querySelector("#force-add").onclick = () => { state.shopping.push(item); queueShoppingPushNotification(item.name); saveState("המוצר נוסף למרות הכפילות"); dialog.close(); render(); };
     container.querySelector("#cancel-duplicate").onclick = () => dialog.close();
     return;
   }
   state.shopping.push(item);
+  queueShoppingPushNotification(item.name);
   saveState("המוצר נוסף לרשימת הקניות");
   dialog.close();
   render();
@@ -2487,6 +2848,7 @@ function eventFormHtml(item = null) {
     <div class="form-grid" id="event-time-fields" ${allDay ? "hidden" : ""}><label>שעת התחלה<input name="startTime" type="time" value="${escapeHtml(item?.startTime || "")}" /></label><label>שעת סיום<input name="endTime" type="time" value="${escapeHtml(item?.endTime || "")}" /></label></div>
     <label>הערות<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
     <label>חזרתיות<select name="recurring"><option value="none" ${item?.recurring === "none" ? "selected" : ""}>ללא חזרה</option><option value="weekly" ${item?.recurring === "weekly" ? "selected" : ""}>שבועי</option><option value="monthly" ${item?.recurring === "monthly" ? "selected" : ""}>חודשי</option><option value="yearly" ${item?.recurring === "yearly" ? "selected" : ""}>שנתי</option></select></label>
+    ${notificationChoiceHtml({ checked: !item, text: item ? "שליחת התראה על העדכון" : "שליחת התראה על האירוע החדש" })}
   </div>`;
 }
 
@@ -2497,17 +2859,32 @@ function submitEvent(formData, id = null) {
     startTime: allDay ? "" : formData.get("startTime"), endTime: allDay ? "" : formData.get("endTime"),
     location: String(formData.get("location") || "").trim(), notes: String(formData.get("notes") || "").trim(), recurring: formData.get("recurring"),
   };
+  let savedEvent;
   if (id) {
-    const existingEvent = state.events.find((event) => event.id === id);
-    if (!existingEvent) return;
-    Object.assign(existingEvent, values);
-    existingEvent.excludedDates = Array.isArray(existingEvent.excludedDates) ? existingEvent.excludedDates : [];
+    savedEvent = state.events.find((event) => event.id === id);
+    if (!savedEvent) return;
+    Object.assign(savedEvent, values);
+    savedEvent.excludedDates = Array.isArray(savedEvent.excludedDates) ? savedEvent.excludedDates : [];
   } else {
-    state.events.push({ id: crypto.randomUUID(), ...values, excludedDates: [] });
+    savedEvent = { id: crypto.randomUUID(), ...values, excludedDates: [] };
+    state.events.push(savedEvent);
   }
+  const shouldNotify = formData.get("sendNotification") === "on";
   saveState(id ? "האירוע עודכן" : "האירוע נוסף");
   dialog.close();
   render();
+  if (shouldNotify) {
+    const recurrence = { weekly: " · חוזר מדי שבוע", monthly: " · חוזר מדי חודש", yearly: " · חוזר מדי שנה" }[values.recurring] || "";
+    const time = values.allDay ? " · כל היום" : (values.startTime ? ` · ${values.startTime}` : "");
+    void sendHouseholdNotification({
+      kind: "event",
+      title: id ? "אירוע משפחתי עודכן" : "אירוע חדש במשפחה",
+      body: `${values.title} · ${formatDate(values.date)}${time}${recurrence}`,
+      targetPage: "events",
+      entityId: savedEvent.id,
+      metadata: { recurring: values.recurring, date: values.date },
+    }, { showNoRecipients: true });
+  }
 }
 
 function taskFormHtml(item = null) {
@@ -2515,6 +2892,7 @@ function taskFormHtml(item = null) {
     <label>שם הסידור<input name="title" required ${item ? "" : "autofocus"} value="${escapeHtml(item?.title || "")}" /></label>
     <label>תיאור<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
     <div class="form-grid"><label>שיוך<select name="assignee">${TASK_ASSIGNEES.map((assignee) => `<option value="${escapeHtml(assignee)}" ${item?.assignee === assignee ? "selected" : ""}>${escapeHtml(TASK_ASSIGNEE_LABELS[assignee] || assignee)}</option>`).join("")}</select></label><label>קטגוריה<select name="category">${taskCategoryOptions(item?.category || "אחר")}</select></label></div>
+    ${notificationChoiceHtml({ checked: !item, text: item ? "שליחת התראה על העדכון" : "שליחת התראה על הסידור החדש" })}
   </div>`;
 }
 
@@ -2529,17 +2907,30 @@ function submitTask(formData, id = null) {
   if (!state.taskCategories.some((category) => normalizeName(category) === normalizeName(values.category))) {
     state.taskCategories.push(values.category);
   }
+  let savedTask;
   if (id) {
-    const task = state.tasks.find((existing) => existing.id === id);
-    if (!task) return;
-    Object.assign(task, values);
+    savedTask = state.tasks.find((existing) => existing.id === id);
+    if (!savedTask) return;
+    Object.assign(savedTask, values);
   } else {
     const nextOrder = state.tasks.reduce((max, task) => Math.max(max, Number(task.order || 0)), -1) + 1;
-    state.tasks.push({ id: crypto.randomUUID(), ...values, completed: false, completedAt: null, order: nextOrder });
+    savedTask = { id: crypto.randomUUID(), ...values, completed: false, completedAt: null, order: nextOrder };
+    state.tasks.push(savedTask);
   }
+  const shouldNotify = formData.get("sendNotification") === "on";
   saveState(id ? "הסידור עודכן" : "הסידור נוסף");
   dialog.close();
   render();
+  if (shouldNotify) {
+    void sendHouseholdNotification({
+      kind: "task",
+      title: id ? "סידור משפחתי עודכן" : "סידור חדש",
+      body: `${values.title}${values.assignee ? ` · ${TASK_ASSIGNEE_LABELS[values.assignee] || values.assignee}` : ""}`,
+      targetPage: "tasks",
+      entityId: savedTask.id,
+      metadata: { assignee: values.assignee, category: values.category },
+    }, { showNoRecipients: true });
+  }
 }
 
 function referencesToText(references = []) {
@@ -2568,6 +2959,7 @@ function wishFormHtml(item = null) {
     <label>קטגוריה<select name="category">${wishCategoryOptions(item?.category || (wishCategoryFilter === "הכל" ? "בית" : wishCategoryFilter))}</select></label>
     <label>קישורים אופציונליים<textarea name="references" placeholder="קישור אחד בכל שורה (לא חובה)">${escapeHtml(referencesToText(item?.references || []))}</textarea></label>
     <label>הערה אופציונלית<textarea name="note">${escapeHtml(item?.note || "")}</textarea></label>
+    ${notificationChoiceHtml({ checked: false, text: item ? "שליחת התראה על העדכון" : "שליחת התראה על התכנון החדש" })}
   </div>`;
 }
 
@@ -2581,16 +2973,29 @@ function submitWish(formData, id = null) {
     note: String(formData.get("note") || "").trim(),
   };
   if (!state.wishCategories.includes(values.category)) state.wishCategories.push(values.category);
+  let savedWish;
   if (id) {
-    const wish = state.wishes.find((existing) => existing.id === id);
-    if (!wish) return;
-    Object.assign(wish, values);
+    savedWish = state.wishes.find((existing) => existing.id === id);
+    if (!savedWish) return;
+    Object.assign(savedWish, values);
   } else {
-    state.wishes.push({ id: crypto.randomUUID(), ...values });
+    savedWish = { id: crypto.randomUUID(), ...values };
+    state.wishes.push(savedWish);
   }
+  const shouldNotify = formData.get("sendNotification") === "on";
   saveState(id ? "התכנון עודכן" : "התכנון נוסף");
   dialog.close();
   render();
+  if (shouldNotify) {
+    void sendHouseholdNotification({
+      kind: "planning",
+      title: id ? "תכנון משפחתי עודכן" : "תכנון חדש",
+      body: `${values.title} · ${values.category}`,
+      targetPage: "planning",
+      entityId: savedWish.id,
+      metadata: { category: values.category },
+    }, { showNoRecipients: true });
+  }
 }
 
 function tripFormHtml(item = null) {
