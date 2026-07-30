@@ -49,6 +49,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "⚙️", text: "אפשר להפעיל או לכבות התראות מתפריט האפליקציה בכל מכשיר בנפרד." },
     ],
   },
+  {
+    version: "15.20",
+    updates: [
+      { icon: "✨", text: "חלון מה חדש מציג רק עדכונים שלא נקראו; משתמש חדש רואה רק את הגרסה העדכנית." },
+      { icon: "🏠", text: "שם משפחת זילכה הוסר גם ממסך הטעינה הראשוני של האפליקציה." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -1071,8 +1078,10 @@ function compareVersions(first, second) {
 }
 
 function unseenReleaseGroups(lastSeenVersion) {
-  return APP_RELEASES
-    .filter((release) => !lastSeenVersion || compareVersions(release.version, lastSeenVersion) > 0)
+  const candidateReleases = lastSeenVersion
+    ? APP_RELEASES.filter((release) => compareVersions(release.version, lastSeenVersion) > 0)
+    : [APP_RELEASE];
+  return candidateReleases
     .map((release) => ({
       ...release,
       updates: release.updates.filter((update) => !update.adminOnly || currentUserIsAdmin),

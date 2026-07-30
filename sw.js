@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-19-push-notifications";
+const CACHE = "nihul-habayit-v15-20-fixes";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {
