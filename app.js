@@ -71,6 +71,20 @@ const APP_RELEASES = Object.freeze([
       { icon: "⋮", text: "תפריט שלוש הנקודות במובייל מופיע רק בעמוד הבית." },
     ],
   },
+  {
+    version: "15.23",
+    updates: [
+      { icon: "🛒", text: "תצוגת הקניות בעמוד הבית נוקתה והקישור המיותר לרשימת הקניות הוסר." },
+    ],
+  },
+  {
+    version: "15.24",
+    updates: [
+      { icon: "📅", text: "אפשר ליצור אירוע שנמשך כמה ימים והוא יוצג בכל הימים הרלוונטיים בלוח השנה." },
+      { icon: "🛒", text: "קניות קודמות מוצגות כרשימת מוצרים אחת, ללא חלוקה לפי תאריכים." },
+      { icon: "🧳", text: "פריטים מטיולים קודמים מוצגים כרשימה אחת גדולה ונוחה לשימוש חוזר." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -895,6 +909,9 @@ function normalizeState(input) {
       event.participants = event.participants.filter((name) => HOUSEHOLD_MEMBERS.includes(name));
       event.allDay = Boolean(event.allDay);
       event.recurring = ["weekly", "monthly", "yearly"].includes(event.recurring) ? event.recurring : "none";
+      const normalizedStartDate = /^\d{4}-\d{2}-\d{2}$/.test(String(event.date || "")) ? String(event.date) : "";
+      const normalizedEndDate = /^\d{4}-\d{2}-\d{2}$/.test(String(event.endDate || "")) ? String(event.endDate) : normalizedStartDate;
+      event.endDate = normalizedEndDate && normalizedEndDate >= normalizedStartDate ? normalizedEndDate : normalizedStartDate;
       event.excludedDates = [...new Set((Array.isArray(event.excludedDates) ? event.excludedDates : [])
         .map((date) => String(date || "").trim())
         .filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)))].sort();
@@ -1589,10 +1606,22 @@ function dateSerialFromKey(key) {
   return Math.floor(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86400000);
 }
 
-function eventOccursOnDate(event, key) {
+function dateKeyFromSerial(serial) {
+  if (!Number.isFinite(serial)) return "";
+  const date = new Date(serial * 86400000);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function eventDurationDays(event) {
+  const startSerial = dateSerialFromKey(event?.date);
+  const endSerial = dateSerialFromKey(event?.endDate || event?.date);
+  if (startSerial === null || endSerial === null || endSerial < startSerial) return 0;
+  return endSerial - startSerial;
+}
+
+function isEventOccurrenceStart(event, key) {
   const startKey = String(event?.date || "");
   if (!startKey || !key) return false;
-  if ((Array.isArray(event.excludedDates) ? event.excludedDates : []).includes(key)) return false;
   if (startKey === key) return true;
 
   const recurrence = String(event.recurring || "none");
@@ -1604,20 +1633,63 @@ function eventOccursOnDate(event, key) {
 
   if (recurrence === "weekly") return (targetSerial - startSerial) % 7 === 0;
 
-  const [startYear, startMonth, startDay] = startKey.split("-").map(Number);
-  const [targetYear, targetMonth, targetDay] = key.split("-").map(Number);
+  const [, startMonth, startDay] = startKey.split("-").map(Number);
+  const [, targetMonth, targetDay] = key.split("-").map(Number);
   if (recurrence === "monthly") return targetDay === startDay;
   if (recurrence === "yearly") return targetMonth === startMonth && targetDay === startDay;
   return false;
 }
 
+function eventOccurrenceStartKeyForDate(event, key) {
+  const startSerial = dateSerialFromKey(event?.date);
+  const targetSerial = dateSerialFromKey(key);
+  if (startSerial === null || targetSerial === null || targetSerial < startSerial) return "";
+  const duration = eventDurationDays(event);
+  const excluded = new Set(Array.isArray(event.excludedDates) ? event.excludedDates : []);
+  for (let offset = 0; offset <= duration; offset += 1) {
+    const candidateSerial = targetSerial - offset;
+    if (candidateSerial < startSerial) break;
+    const candidateKey = dateKeyFromSerial(candidateSerial);
+    if (isEventOccurrenceStart(event, candidateKey) && !excluded.has(candidateKey)) return candidateKey;
+  }
+  return "";
+}
+
+function eventOccurrenceEndKey(event, occurrenceStartKey) {
+  const startSerial = dateSerialFromKey(occurrenceStartKey);
+  if (startSerial === null) return occurrenceStartKey || "";
+  return dateKeyFromSerial(startSerial + eventDurationDays(event));
+}
+
+function eventOccursOnDate(event, key) {
+  return Boolean(eventOccurrenceStartKeyForDate(event, key));
+}
+
 function eventOccurrenceForDate(event, key) {
+  const occurrenceStartDate = eventOccurrenceStartKeyForDate(event, key) || String(event.date || key);
+  const occurrenceEndDate = eventOccurrenceEndKey(event, occurrenceStartDate);
   return {
     ...event,
     date: key,
+    endDate: occurrenceEndDate,
+    occurrenceStartDate,
+    occurrenceEndDate,
     sourceEventId: event.id,
-    isRecurringOccurrence: key !== event.date,
+    isRecurringOccurrence: occurrenceStartDate !== event.date,
+    isMultiDayOccurrence: occurrenceEndDate !== occurrenceStartDate,
   };
+}
+
+function formatEventDateRange(startKey, endKey = startKey, { weekday = false } = {}) {
+  const start = new Date(`${startKey}T12:00:00`);
+  const end = new Date(`${endKey || startKey}T12:00:00`);
+  const options = weekday
+    ? { weekday: "long", day: "numeric", month: "long", year: "numeric" }
+    : { day: "numeric", month: "short", year: "numeric" };
+  const formatter = new Intl.DateTimeFormat("he-IL", options);
+  if (Number.isNaN(start.getTime())) return startKey || "ללא תאריך";
+  if (Number.isNaN(end.getTime()) || startKey === endKey) return formatter.format(start);
+  return `${formatter.format(start)} – ${formatter.format(end)}`;
 }
 
 function calendarEntriesForDate(key) {
@@ -1816,7 +1888,7 @@ function renderHome() {
       ${calendarHtml(year, month)}
     </section>
     <section class="card home-shopping-card">
-      <div class="card-title-row home-shopping-title-row"><div><h3 class="card-title">קניות</h3><span class="muted small">${activeShopping.length} פריטים פעילים</span></div><div class="home-shopping-actions"><button type="button" class="secondary-button compact-button" data-add-shopping-item>＋ הוספת פריט</button><button class="link-button" data-nav="shopping">לרשימת הקניות</button></div></div>
+      <div class="card-title-row home-shopping-title-row"><div><h3 class="card-title">קניות</h3><span class="muted small">${activeShopping.length} פריטים פעילים</span></div><div class="home-shopping-actions"><button type="button" class="secondary-button compact-button" data-add-shopping-item>＋ הוספת פריט</button></div></div>
       <div class="home-shopping-categories">${shoppingCounts.map(([category, count]) => homeShoppingCategoryHtml(category, count)).join("") || emptyHtml("רשימת הקניות ריקה")}</div>
     </section>`;
 }
@@ -1889,8 +1961,9 @@ function openCalendarDay(key) {
   dialogForm.onsubmit = null;
   dialogBody.innerHTML = entries.length
     ? `<div class="calendar-day-dialog-list">${entries.map((event) => {
-        const when = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
-        return `<article class="calendar-day-dialog-event ${event.isHoliday ? "holiday" : ""}"><div class="calendar-day-event-main"><strong>${escapeHtml(event.title)}</strong><span>${when}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</span></div>${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}</article>`;
+        const time = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
+        const range = event.isMultiDayOccurrence ? `${escapeHtml(formatEventDateRange(event.occurrenceStartDate, event.occurrenceEndDate))} · ` : "";
+        return `<article class="calendar-day-dialog-event ${event.isHoliday ? "holiday" : ""}"><div class="calendar-day-event-main"><strong>${escapeHtml(event.title)}</strong><span>${range}${time}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</span></div>${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}</article>`;
       }).join("")}</div>`
     : emptyHtml("אין אירועים ביום זה");
   if (dialog.open) dialog.close();
@@ -1997,37 +2070,61 @@ function finishShopping() {
   render();
 }
 
-function shoppingHistoryHtml() {
+function shoppingHistoryFlatItems() {
   const history = [...(state.shoppingHistory || [])].sort((a, b) => String(b.endedAt || "").localeCompare(String(a.endedAt || "")));
+  const seen = new Set();
+  const items = [];
+  history.forEach((batch) => {
+    (batch.items || []).forEach((item) => {
+      const key = `${normalizeName(item.name)}|${normalizeName(item.category || "אחר")}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      items.push({ ...item, historyBatchId: batch.id });
+    });
+  });
+  return items.sort((a, b) => collator.compare(a.name, b.name));
+}
+
+function shoppingHistoryHtml() {
+  const items = shoppingHistoryFlatItems();
   return `<details class="cycle-history-card shopping-history-card">
-    <summary><span>קניות קודמות</span><span class="count-pill completed">${history.length}</span></summary>
-    <div class="cycle-history-list">${history.map((batch) => {
-      const date = new Date(batch.endedAt || batch.startedAt || Date.now());
-      const title = batch.title || `קנייה מ־${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "long", year: "numeric" }).format(date)}`;
-      return `<details class="cycle-history-batch">
-        <summary><span><strong>${escapeHtml(title)}</strong><small>${batch.items.length} פריטים</small></span><span>⌄</span></summary>
-        <div class="cycle-history-batch-actions"><button type="button" class="secondary-button compact-button" data-restore-shopping-batch="${batch.id}">החזרת כל המוצרים לרשימה</button></div>
-        <div class="cycle-history-items">${batch.items.map((item) => `<div class="cycle-history-item"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span><button type="button" class="link-button" data-restore-shopping-item="${batch.id}" data-history-item-id="${item.id}">החזרה</button></div>`).join("")}</div>
-      </details>`;
-    }).join("") || emptyHtml("אין עדיין קניות קודמות")}</div>
+    <summary><span>מוצרים מקניות קודמות</span><span class="count-pill completed">${items.length}</span></summary>
+    ${items.length ? `<div class="cycle-history-batch-actions"><button type="button" class="secondary-button compact-button" data-restore-all-shopping-history>החזרת כל המוצרים לרשימה</button></div>` : ""}
+    <div class="cycle-history-items flat-history-list">${items.map((item) => `<div class="cycle-history-item"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span><button type="button" class="link-button" data-restore-shopping-item="${item.historyBatchId}" data-history-item-id="${item.id}">החזרה</button></div>`).join("") || emptyHtml("אין עדיין מוצרים מקניות קודמות")}</div>
   </details>`;
 }
 
-function restoreShoppingHistoryItems(batchId, itemId = "") {
-  const batch = (state.shoppingHistory || []).find((entry) => entry.id === batchId);
-  if (!batch) return;
-  const items = itemId ? batch.items.filter((item) => item.id === itemId) : batch.items;
+function restoreArchivedShoppingItems(items) {
   items.forEach((archived) => {
     const existing = state.shopping.find((item) => !item.purchased && normalizeName(item.name) === normalizeName(archived.name) && (item.category || "אחר") === (archived.category || "אחר"));
-    if (existing) existing.quantity = positiveInteger(existing.quantity) + positiveInteger(archived.quantity);
-    else state.shopping.push({ ...archived, id: crypto.randomUUID(), purchased: false, purchasedAt: null });
+    if (existing) existing.quantity = Math.max(positiveInteger(existing.quantity), positiveInteger(archived.quantity));
+    else {
+      const restored = { ...archived, id: crypto.randomUUID(), purchased: false, purchasedAt: null };
+      delete restored.historyBatchId;
+      state.shopping.push(restored);
+    }
   });
   if (state.shoppingSession) {
     const ids = new Set(state.shoppingSession.itemIds || []);
     state.shopping.forEach((item) => ids.add(item.id));
     state.shoppingSession.itemIds = [...ids];
   }
+}
+
+function restoreShoppingHistoryItems(batchId, itemId = "") {
+  const batch = (state.shoppingHistory || []).find((entry) => entry.id === batchId);
+  if (!batch) return;
+  const items = itemId ? batch.items.filter((item) => item.id === itemId) : batch.items;
+  restoreArchivedShoppingItems(items);
   saveState(items.length === 1 ? "המוצר הוחזר לרשימה" : "המוצרים הוחזרו לרשימה");
+  render();
+}
+
+function restoreAllShoppingHistoryItems() {
+  const items = shoppingHistoryFlatItems();
+  if (!items.length) return;
+  restoreArchivedShoppingItems(items);
+  saveState("כל המוצרים הוחזרו לרשימה");
   render();
 }
 
@@ -2196,12 +2293,21 @@ function eventOccurrencesBetween(startDate, endDate, maxOccurrences = 5000) {
   const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 12);
   const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 12);
   const occurrences = [];
+  const seen = new Set();
   if (end < start) return occurrences;
   for (let cursor = new Date(start); cursor <= end && occurrences.length < maxOccurrences; cursor.setDate(cursor.getDate() + 1)) {
     const key = dateKey(cursor);
     state.events.forEach((event) => {
-      if (occurrences.length >= maxOccurrences) return;
-      if (eventOccursOnDate(event, key)) occurrences.push(eventOccurrenceForDate(event, key));
+      if (occurrences.length >= maxOccurrences || !eventOccursOnDate(event, key)) return;
+      const occurrence = eventOccurrenceForDate(event, key);
+      const occurrenceKey = `${event.id}|${occurrence.occurrenceStartDate}`;
+      if (seen.has(occurrenceKey)) return;
+      seen.add(occurrenceKey);
+      occurrences.push({
+        ...occurrence,
+        date: occurrence.occurrenceStartDate,
+        endDate: occurrence.occurrenceEndDate,
+      });
     });
   }
   return occurrences.sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
@@ -2221,7 +2327,7 @@ function eventMonthGroupHtml(monthKey, monthEvents, { emptyMessage = "אין א�
 
 function groupEventOccurrencesByMonth(events) {
   return events.reduce((months, event) => {
-    const key = String(event.date || "").slice(0, 7) || "ללא-תאריך";
+    const key = event.groupMonthKey || String(event.date || "").slice(0, 7) || "ללא-תאריך";
     if (!months.has(key)) months.set(key, []);
     months.get(key).push(event);
     return months;
@@ -2242,11 +2348,18 @@ function renderEvents() {
     .sort((a, b) => a - b)[0] || today;
   const historyStart = earliestStoredDate < currentMonthStart ? earliestStoredDate : currentMonthStart;
 
-  const upcoming = eventOccurrencesBetween(today, futureEnd);
-  const past = yesterday >= historyStart ? eventOccurrencesBetween(historyStart, yesterday) : [];
+  const allOccurrences = eventOccurrencesBetween(historyStart, futureEnd);
+  const todayKey = dateKey(today);
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const upcoming = allOccurrences
+    .filter((event) => String(event.endDate || event.date) >= todayKey)
+    .map((event) => ({
+      ...event,
+      groupMonthKey: String(event.date || "").slice(0, 7) < currentMonthKey ? currentMonthKey : String(event.date || "").slice(0, 7),
+    }));
+  const past = allOccurrences.filter((event) => String(event.endDate || event.date) < todayKey);
   const upcomingGroups = groupEventOccurrencesByMonth(upcoming);
   const pastGroups = groupEventOccurrencesByMonth(past);
-  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const futureKeys = [...upcomingGroups.keys()].sort();
   const orderedFutureKeys = [currentMonthKey, ...futureKeys.filter((key) => key !== currentMonthKey)];
 
@@ -2263,9 +2376,11 @@ function renderEvents() {
 function eventFullHtml(event) {
   const date = new Date(`${event.date}T12:00:00`);
   const sourceId = event.sourceEventId || event.id;
+  const isMultiDay = String(event.endDate || event.date) !== String(event.date || "");
+  const rangeLabel = isMultiDay ? `<div class="event-date-range-label">${escapeHtml(formatEventDateRange(event.date, event.endDate))}</div>` : "";
   return `<div class="compact-event-row event-summary-row" data-view-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}" role="button" tabindex="0" aria-label="פתיחת פרטי האירוע ${escapeHtml(event.title)}">
     <div class="compact-event-date"><strong>${date.getDate()}</strong><span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(date)}</span></div>
-    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}${event.recurring && event.recurring !== "none" ? ` <span class="recurring-event-mark" title="אירוע חוזר">↻</span>` : ""}</div></div>
+    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}${event.recurring && event.recurring !== "none" ? ` <span class="recurring-event-mark" title="אירוע חוזר">↻</span>` : ""}</div>${rangeLabel}</div>
     ${moreMenuHtml(`<button type="button" data-edit-event="${sourceId}">עריכה</button><button type="button" data-download-ics="${sourceId}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}">ביטול אירוע</button>`)}
   </div>`;
 }
@@ -2274,9 +2389,10 @@ function eventFullHtml(event) {
 function openEventDetails(id, occurrenceDate = "") {
   const event = state.events.find((existing) => existing.id === id);
   if (!event) return;
-  const displayDate = occurrenceDate || event.date;
-  const date = new Date(`${displayDate}T12:00:00`);
-  const dateLabel = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(date);
+  const selectedDate = occurrenceDate || event.date;
+  const occurrenceStartDate = eventOccurrenceStartKeyForDate(event, selectedDate) || event.date;
+  const occurrenceEndDate = eventOccurrenceEndKey(event, occurrenceStartDate);
+  const dateLabel = formatEventDateRange(occurrenceStartDate, occurrenceEndDate, { weekday: true });
   const timeLabel = event.allDay
     ? "כל היום"
     : [event.startTime || "", event.endTime || ""].filter(Boolean).join("–") || "לא הוגדרה שעה";
@@ -2287,7 +2403,7 @@ function openEventDetails(id, occurrenceDate = "") {
   dialogSubmit.hidden = true;
   dialogForm.onsubmit = null;
   dialogBody.innerHTML = `<div class="event-details-list">
-    <div class="event-detail-row"><span>תאריך</span><strong>${escapeHtml(dateLabel)}</strong></div>
+    <div class="event-detail-row"><span>${occurrenceStartDate === occurrenceEndDate ? "תאריך" : "תאריכים"}</span><strong>${escapeHtml(dateLabel)}</strong></div>
     <div class="event-detail-row"><span>שעה</span><strong>${escapeHtml(timeLabel)}</strong></div>
     ${event.location ? `<div class="event-detail-row"><span>מקום</span><strong>${escapeHtml(event.location)}</strong></div>` : ""}
     ${event.notes ? `<div class="event-detail-notes"><span>הערות</span><p>${escapeHtml(event.notes)}</p></div>` : ""}
@@ -2514,28 +2630,23 @@ function tripItemHtml(item) {
   </div>`;
 }
 
-function tripArchiveHtml() {
+function tripArchiveFlatItems() {
   const archive = [...state.tripArchive].sort((a, b) => String(b.archivedAt || "").localeCompare(String(a.archivedAt || "")) || collator.compare(a.name, b.name));
-  const batches = archive.reduce((map, item) => {
-    const batchId = item.archiveBatchId || `legacy-${String(item.archivedAt || "").slice(0, 10) || "items"}`;
-    if (!map.has(batchId)) map.set(batchId, []);
-    map.get(batchId).push(item);
-    return map;
-  }, new Map());
-  const groups = [...batches.entries()];
+  const seen = new Set();
+  return archive.filter((item) => {
+    const key = `${normalizeName(item.name)}|${normalizeName(item.category || "אחר")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).sort((a, b) => collator.compare(a.name, b.name));
+}
+
+function tripArchiveHtml() {
+  const archive = tripArchiveFlatItems();
   return `<details class="card trip-archive-card cycle-history-card" ${archivedTripSelection.size ? "open" : ""}>
-    <summary><span>טיולים קודמים</span><span class="count-pill completed">${groups.length}</span></summary>
-    ${archivedTripSelection.size ? `<div class="archive-actions"><button type="button" class="secondary-button compact-button" data-restore-selected-trip>החזרת מסומנים</button><button type="button" class="danger-button compact-button" data-delete-archived-trip>מחיקה לצמיתות</button></div>` : ""}
-    <div class="cycle-history-list">${groups.map(([batchId, items]) => {
-      const first = items[0];
-      const date = new Date(first.archivedAt || Date.now());
-      const title = first.archiveTitle || `טיול מ־${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "long", year: "numeric" }).format(date)}`;
-      return `<details class="cycle-history-batch">
-        <summary><span><strong>${escapeHtml(title)}</strong><small>${items.length} פריטים</small></span><span>⌄</span></summary>
-        <div class="cycle-history-batch-actions"><button type="button" class="secondary-button compact-button" data-restore-trip-batch="${escapeHtml(batchId)}">החזרת כל הרשימה</button><button type="button" class="danger-link-button" data-delete-trip-batch="${escapeHtml(batchId)}">מחיקת הטיול</button></div>
-        <div class="trip-archive-list">${items.map((item) => `<label class="trip-archive-row"><input type="checkbox" data-trip-archive-select="${item.id}" ${archivedTripSelection.has(item.id) ? "checked" : ""}/><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span></label>`).join("")}</div>
-      </details>`;
-    }).join("") || emptyHtml("אין עדיין טיולים קודמים")}</div>
+    <summary><span>פריטים מטיולים קודמים</span><span class="count-pill completed">${archive.length}</span></summary>
+    ${archive.length ? `<div class="archive-actions"><button type="button" class="secondary-button compact-button" data-restore-all-trip>החזרת כל הפריטים</button>${archivedTripSelection.size ? `<button type="button" class="secondary-button compact-button" data-restore-selected-trip>החזרת מסומנים</button><button type="button" class="danger-button compact-button" data-delete-archived-trip>מחיקה לצמיתות</button>` : ""}</div>` : ""}
+    <div class="trip-archive-list flat-history-list">${archive.map((item) => `<label class="trip-archive-row"><input type="checkbox" data-trip-archive-select="${item.id}" ${archivedTripSelection.has(item.id) ? "checked" : ""}/><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span></label>`).join("") || emptyHtml("אין עדיין פריטים מטיולים קודמים")}</div>
   </details>`;
 }
 
@@ -2560,11 +2671,7 @@ function finishTrip() {
     render();
     return;
   }
-  const suggested = `טיול ${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "numeric", year: "2-digit" }).format(new Date())}`;
-  const enteredTitle = window.prompt("שם הטיול לארכיון (אפשר להשאיר את השם המוצע):", suggested);
-  if (enteredTitle === null) return;
-  const archiveTitle = String(enteredTitle || suggested).trim() || suggested;
-  if (!confirm(`לסיים את „${archiveTitle}” ולהעביר את הרשימה לארכיון?`)) return;
+  if (!confirm("לסיים את הטיול ולהעביר את הפריטים לרשימת הפריטים מטיולים קודמים?")) return;
   const archivedAt = new Date().toISOString();
   const archiveBatchId = state.tripSession.id || crypto.randomUUID();
   state.tripArchive.push(...state.tripItems.map((item) => ({
@@ -2573,7 +2680,7 @@ function finishTrip() {
     packedAt: null,
     archivedAt,
     archiveBatchId,
-    archiveTitle,
+    archiveTitle: "",
   })));
   state.tripItems = [];
   state.tripSession = null;
@@ -2668,7 +2775,7 @@ function attachScreenEvents() {
 
   document.querySelector("[data-start-shopping]")?.addEventListener("click", () => startShopping());
   document.querySelector("[data-finish-shopping]")?.addEventListener("click", finishShopping);
-  document.querySelectorAll("[data-restore-shopping-batch]").forEach((button) => button.addEventListener("click", () => restoreShoppingHistoryItems(button.dataset.restoreShoppingBatch)));
+  document.querySelector("[data-restore-all-shopping-history]")?.addEventListener("click", restoreAllShoppingHistoryItems);
   document.querySelectorAll("[data-restore-shopping-item]").forEach((button) => button.addEventListener("click", () => restoreShoppingHistoryItems(button.dataset.restoreShoppingItem, button.dataset.historyItemId)));
   document.querySelectorAll("[data-shopping-toggle]").forEach((button) => button.addEventListener("click", () => toggleShopping(button.dataset.shoppingToggle)));
   document.querySelectorAll("[data-shopping-quantity]").forEach((button) => button.addEventListener("click", () => updateShoppingQuantity(button.dataset.shoppingQuantity, button.dataset.delta)));
@@ -2722,8 +2829,6 @@ function attachScreenEvents() {
 
   document.querySelector("[data-start-trip]")?.addEventListener("click", () => startTripPacking());
   document.querySelector("[data-finish-trip]")?.addEventListener("click", finishTrip);
-  document.querySelectorAll("[data-restore-trip-batch]").forEach((button) => button.addEventListener("click", () => restoreTripBatch(button.dataset.restoreTripBatch)));
-  document.querySelectorAll("[data-delete-trip-batch]").forEach((button) => button.addEventListener("click", () => deleteTripBatch(button.dataset.deleteTripBatch)));
   document.querySelectorAll("[data-trip-toggle]").forEach((button) => button.addEventListener("click", () => toggleTrip(button.dataset.tripToggle)));
   document.querySelectorAll("[data-trip-quantity]").forEach((button) => button.addEventListener("click", () => updateTripQuantity(button.dataset.tripQuantity, button.dataset.delta)));
   document.querySelectorAll("[data-edit-trip]").forEach((button) => button.addEventListener("click", () => openEditDialog("trip", button.dataset.editTrip)));
@@ -2959,16 +3064,18 @@ function restoreSelectedTripItems() {
 }
 
 function restoreAllTripItems() {
-  if (!state.tripArchive.length) return;
-  restoreTripItems(state.tripArchive.map((item) => item.id));
+  const items = tripArchiveFlatItems();
+  if (!items.length) return;
+  restoreTripItems(items.map((item) => item.id));
 }
 
 function permanentlyDeleteArchivedTripItems() {
   const ids = [...archivedTripSelection];
   if (!ids.length) return;
   if (!confirm(`למחוק לצמיתות ${ids.length} פריטים מהארכיון? לא ניתן לבטל פעולה זו.`)) return;
-  const idSet = new Set(ids);
-  state.tripArchive = state.tripArchive.filter((item) => !idSet.has(item.id));
+  const selectedItems = state.tripArchive.filter((item) => ids.includes(item.id));
+  const selectedKeys = new Set(selectedItems.map((item) => `${normalizeName(item.name)}|${normalizeName(item.category || "אחר")}`));
+  state.tripArchive = state.tripArchive.filter((item) => !selectedKeys.has(`${normalizeName(item.name)}|${normalizeName(item.category || "אחר")}`));
   archivedTripSelection.clear();
   saveState("הפריטים נמחקו לצמיתות מהארכיון");
   render();
@@ -2994,7 +3101,9 @@ function removeEventSeries(eventId) {
 function cancelSingleEventOccurrence(eventId, occurrenceDate) {
   const event = state.events.find((existing) => existing.id === eventId);
   if (!event || !eventOccursOnDate(event, occurrenceDate)) return;
-  event.excludedDates = [...new Set([...(event.excludedDates || []), occurrenceDate])].sort();
+  const occurrenceStartDate = eventOccurrenceStartKeyForDate(event, occurrenceDate);
+  if (!occurrenceStartDate) return;
+  event.excludedDates = [...new Set([...(event.excludedDates || []), occurrenceStartDate])].sort();
   saveState("המועד הזה בוטל ושאר הסדרה נשמרה");
   if (dialog.open) dialog.close();
   render();
@@ -3012,10 +3121,9 @@ function openEventCancellationDialog(eventId, occurrenceDate = "") {
     return;
   }
 
-  const date = new Date(`${selectedDate}T12:00:00`);
-  const readableDate = Number.isNaN(date.getTime())
-    ? selectedDate
-    : new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "long", year: "numeric" }).format(date);
+  const occurrenceStartDate = eventOccurrenceStartKeyForDate(event, selectedDate) || selectedDate;
+  const occurrenceEndDate = eventOccurrenceEndKey(event, occurrenceStartDate);
+  const readableDate = formatEventDateRange(occurrenceStartDate, occurrenceEndDate);
 
   if (dialog.open) dialog.close();
   dialogEyebrow.textContent = "אירוע חוזר";
@@ -3025,7 +3133,7 @@ function openEventCancellationDialog(eventId, occurrenceDate = "") {
   dialogBody.innerHTML = `<section class="recurring-cancel-panel">
     <p>האירוע „${escapeHtml(event.title)}” מוגדר כאירוע חוזר.</p>
     <div class="recurring-cancel-actions">
-      <button type="button" class="secondary-button" data-cancel-one-occurrence>רק בתאריך ${escapeHtml(readableDate)}</button>
+      <button type="button" class="secondary-button" data-cancel-one-occurrence>רק המועד ${escapeHtml(readableDate)}</button>
       <button type="button" class="danger-button" data-cancel-entire-series>כל סדרת האירועים</button>
     </div>
     <p class="muted small">ביטול מועד אחד לא ישפיע על שאר המועדים בסדרה.</p>
@@ -3095,6 +3203,25 @@ function showConfiguredDialog(config) {
     const syncAllDay = () => { timeFields.hidden = allDayToggle.checked; };
     allDayToggle.addEventListener("change", syncAllDay);
     syncAllDay();
+  }
+  const multiDayToggle = dialogBody.querySelector("[data-multi-day-toggle]");
+  const endDateField = dialogBody.querySelector("[data-event-end-date-field]");
+  const startDateInput = dialogBody.querySelector("[data-event-start-date]");
+  const endDateInput = dialogBody.querySelector("[data-event-end-date]");
+  if (multiDayToggle && endDateField && startDateInput && endDateInput) {
+    const syncDateRange = () => {
+      endDateField.hidden = !multiDayToggle.checked;
+      endDateInput.required = multiDayToggle.checked;
+      endDateInput.min = startDateInput.value || "";
+      if (!multiDayToggle.checked) {
+        endDateInput.value = "";
+      } else if (!endDateInput.value || (startDateInput.value && endDateInput.value < startDateInput.value)) {
+        endDateInput.value = startDateInput.value || "";
+      }
+    };
+    multiDayToggle.addEventListener("change", syncDateRange);
+    startDateInput.addEventListener("change", syncDateRange);
+    syncDateRange();
   }
 }
 
@@ -3185,9 +3312,13 @@ function submitShoppingEdit(id, formData) {
 
 function eventFormHtml(item = null) {
   const allDay = Boolean(item?.allDay);
+  const storedEndDate = String(item?.endDate || item?.date || "");
+  const multiDay = Boolean(item?.date && storedEndDate && storedEndDate !== item.date);
   return `<div class="form-stack">
     <label>שם האירוע<input name="title" required autofocus value="${escapeHtml(item?.title || "")}" /></label>
-    <div class="form-grid"><label>תאריך<input name="date" type="date" required value="${escapeHtml(item?.date || "")}" /></label><label>מיקום<input name="location" value="${escapeHtml(item?.location || "")}" /></label></div>
+    <div class="form-grid"><label>תאריך התחלה<input name="date" type="date" required data-event-start-date value="${escapeHtml(item?.date || "")}" /></label><label>מיקום<input name="location" value="${escapeHtml(item?.location || "")}" /></label></div>
+    <label class="checkbox-label multi-day-choice"><input name="multiDay" type="checkbox" data-multi-day-toggle ${multiDay ? "checked" : ""} /> האירוע נמשך כמה ימים</label>
+    <label class="multi-day-end-field" data-event-end-date-field ${multiDay ? "" : "hidden"}>תאריך סיום<input name="endDate" type="date" data-event-end-date min="${escapeHtml(item?.date || "")}" value="${multiDay ? escapeHtml(storedEndDate) : ""}" /></label>
     <label class="checkbox-label all-day-choice"><input name="allDay" type="checkbox" data-all-day-toggle ${allDay ? "checked" : ""} /> אירוע לכל היום</label>
     <div class="form-grid" id="event-time-fields" ${allDay ? "hidden" : ""}><label>שעת התחלה<input name="startTime" type="time" value="${escapeHtml(item?.startTime || "")}" /></label><label>שעת סיום<input name="endTime" type="time" value="${escapeHtml(item?.endTime || "")}" /></label></div>
     <label>הערות<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
@@ -3198,8 +3329,13 @@ function eventFormHtml(item = null) {
 
 function submitEvent(formData, id = null) {
   const allDay = formData.get("allDay") === "on";
+  const date = String(formData.get("date") || "");
+  const multiDay = formData.get("multiDay") === "on";
+  const endDate = multiDay ? String(formData.get("endDate") || "") : date;
+  if (!date || !endDate) return showToast("יש לבחור תאריך לאירוע");
+  if (endDate < date) return showToast("תאריך הסיום חייב להיות אחרי תאריך ההתחלה");
   const values = {
-    title: String(formData.get("title") || "").trim(), date: formData.get("date"), allDay,
+    title: String(formData.get("title") || "").trim(), date, endDate, allDay,
     startTime: allDay ? "" : formData.get("startTime"), endTime: allDay ? "" : formData.get("endTime"),
     location: String(formData.get("location") || "").trim(), notes: String(formData.get("notes") || "").trim(), recurring: formData.get("recurring"),
   };
@@ -3223,10 +3359,10 @@ function submitEvent(formData, id = null) {
     void sendHouseholdNotification({
       kind: "event",
       title: id ? "אירוע משפחתי עודכן" : "אירוע חדש במשפחה",
-      body: `${values.title} · ${formatDate(values.date)}${time}${recurrence}`,
+      body: `${values.title} · ${formatEventDateRange(values.date, values.endDate)}${time}${recurrence}`,
       targetPage: "events",
       entityId: savedEvent.id,
-      metadata: { recurring: values.recurring, date: values.date },
+      metadata: { recurring: values.recurring, date: values.date, endDate: values.endDate },
     }, { showNoRecipients: true });
   }
 }
@@ -3384,16 +3520,18 @@ function downloadICS(eventId) {
   const event = state.events.find((item) => item.id === eventId);
   if (!event) return;
   const dateOnly = event.date.replaceAll("-", "");
+  const eventEndDate = event.endDate && event.endDate >= event.date ? event.endDate : event.date;
+  const endDateOnly = eventEndDate.replaceAll("-", "");
   let dateLines;
   if (event.allDay) {
-    const nextDate = new Date(`${event.date}T12:00:00`);
+    const nextDate = new Date(`${eventEndDate}T12:00:00`);
     nextDate.setDate(nextDate.getDate() + 1);
     const nextDateOnly = `${nextDate.getFullYear()}${String(nextDate.getMonth() + 1).padStart(2, "0")}${String(nextDate.getDate()).padStart(2, "0")}`;
     dateLines = [`DTSTART;VALUE=DATE:${dateOnly}`, `DTEND;VALUE=DATE:${nextDateOnly}`];
   } else {
     const startTime = event.startTime || "00:00";
     const endTime = event.endTime || startTime;
-    dateLines = [`DTSTART:${dateOnly}T${startTime.replace(":", "")}00`, `DTEND:${dateOnly}T${endTime.replace(":", "")}00`];
+    dateLines = [`DTSTART:${dateOnly}T${startTime.replace(":", "")}00`, `DTEND:${endDateOnly}T${endTime.replace(":", "")}00`];
   }
   const excludedDates = (Array.isArray(event.excludedDates) ? event.excludedDates : [])
     .map((date) => date.replaceAll("-", ""))

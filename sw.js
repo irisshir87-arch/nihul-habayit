@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-22-shopping-trip-cycles";
+const CACHE = "nihul-habayit-v15-24-multiday-flat-history";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {

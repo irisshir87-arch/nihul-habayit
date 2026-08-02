@@ -2084,3 +2084,12 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
   .events-history-months { padding: 10px; }
   .events-history-months .events-card { background: #fff; }
 }
+
+
+/* v15.24: multi-day events and flat history lists */
+.multi-day-choice { margin-top: -2px; }
+.multi-day-end-field[hidden] { display: none !important; }
+.event-date-range-label { margin-top: 4px; color: var(--muted); font-size: 12px; font-weight: 650; line-height: 1.35; }
+.flat-history-list { display: grid; gap: 0; }
+.shopping-history-card > .cycle-history-batch-actions { padding: 10px 14px 4px; }
+.trip-archive-card .archive-actions { flex-wrap: wrap; }
