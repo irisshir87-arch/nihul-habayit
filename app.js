@@ -62,6 +62,15 @@ const APP_RELEASES = Object.freeze([
       { icon: "🔔", text: "תוקנה שליחת ההתראות למשתמשים אחרים במשפחה ונוספה הודעת הצלחה או שגיאה ברורה." },
     ],
   },
+  {
+    version: "15.22",
+    updates: [
+      { icon: "🛒", text: "רשימת הקניות פועלת מעכשיו לפי קנייה: מתחילים קנייה, מסמנים מוצרים ומסיימים להיסטוריה." },
+      { icon: "🧳", text: "רשימת הטיול פועלת לפי אריזה וטיולים קודמים נשמרים בארכיון מסודר." },
+      { icon: "🗓️", text: "עמוד האירועים מציג קודם את החודש הנוכחי והעתיד, ואירועים קודמים עברו לאזור נפרד." },
+      { icon: "⋮", text: "תפריט שלוש הנקודות במובייל מופיע רק בעמוד הבית." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -133,6 +142,8 @@ const defaultState = {
     { id: crypto.randomUUID(), name: "גבינה לבנה", quantity: 1, category: "מוצרי חלב", purchased: true, purchasedAt: new Date().toISOString() },
   ],
   shoppingCategories: [...SHOPPING_DEFAULT_CATEGORIES],
+  shoppingSession: null,
+  shoppingHistory: [],
   memberEmails: { iris: "", tomer: "" },
   events: [
     { id: crypto.randomUUID(), title: "יום הולדת לסבתא רותי", date: "2026-07-25", allDay: false, startTime: "19:00", endTime: "22:00", location: "רמת גן", notes: "", participants: ["איריס", "תומר"], recurring: "none" },
@@ -162,6 +173,7 @@ const defaultState = {
     { id: crypto.randomUUID(), name: "מטען לטלפון", category: "ציוד", quantity: 1, packed: true, packedAt: new Date().toISOString() },
   ],
   tripArchive: [],
+  tripSession: null,
 };
 
 let state = null;
@@ -758,6 +770,8 @@ function createEmptyHouseholdState() {
     householdMembers: [...HOUSEHOLD_MEMBERS],
     shopping: [],
     shoppingCategories: [...SHOPPING_DEFAULT_CATEGORIES],
+    shoppingSession: null,
+    shoppingHistory: [],
     memberEmails: { iris: "", tomer: "" },
     events: [],
     taskCategories: [...TASK_CATEGORIES],
@@ -767,6 +781,7 @@ function createEmptyHouseholdState() {
     tripCategories: [...TRIP_DEFAULT_CATEGORIES],
     tripItems: [],
     tripArchive: [],
+    tripSession: null,
   };
 }
 
@@ -823,6 +838,42 @@ function normalizeState(input) {
       loaded.shoppingCategories,
       loaded.shopping.map((item) => item.category)
     ).sort((a, b) => collator.compare(a, b));
+
+    loaded.shoppingHistory = Array.isArray(loaded.shoppingHistory) ? loaded.shoppingHistory : [];
+    loaded.shoppingHistory.forEach((batch) => {
+      batch.id = validStoredId(batch.id) ? batch.id : crypto.randomUUID();
+      batch.startedAt = String(batch.startedAt || batch.endedAt || new Date().toISOString());
+      batch.endedAt = String(batch.endedAt || batch.startedAt);
+      batch.title = String(batch.title || "").trim();
+      batch.items = Array.isArray(batch.items) ? batch.items : [];
+      ensureCollectionIds(batch.items);
+      batch.items.forEach((item) => {
+        item.name = String(item.name || "").trim();
+        item.category = String(item.category || "אחר").trim() || "אחר";
+        item.quantity = positiveInteger(item.quantity);
+        item.purchased = true;
+      });
+    });
+    const shoppingIds = new Set(loaded.shopping.map((item) => item.id));
+    if (loaded.shoppingSession && typeof loaded.shoppingSession === "object") {
+      loaded.shoppingSession = {
+        id: validStoredId(loaded.shoppingSession.id) ? loaded.shoppingSession.id : crypto.randomUUID(),
+        startedAt: String(loaded.shoppingSession.startedAt || new Date().toISOString()),
+        itemIds: [...new Set((Array.isArray(loaded.shoppingSession.itemIds) ? loaded.shoppingSession.itemIds : [])
+          .filter((id) => shoppingIds.has(id)))],
+      };
+      loaded.shopping.forEach((item) => {
+        if (!loaded.shoppingSession.itemIds.includes(item.id)) loaded.shoppingSession.itemIds.push(item.id);
+      });
+    } else if (loaded.shopping.some((item) => item.purchased)) {
+      loaded.shoppingSession = {
+        id: crypto.randomUUID(),
+        startedAt: loaded.shopping.find((item) => item.purchasedAt)?.purchasedAt || new Date().toISOString(),
+        itemIds: loaded.shopping.map((item) => item.id),
+      };
+    } else {
+      loaded.shoppingSession = null;
+    }
 
     loaded.memberEmails = {
       iris: loaded.memberEmails?.iris || "",
@@ -925,6 +976,26 @@ function normalizeState(input) {
       loaded.tripCategories,
       [...loaded.tripItems, ...loaded.tripArchive].map((item) => item.category)
     );
+    const tripIds = new Set(loaded.tripItems.map((item) => item.id));
+    if (loaded.tripSession && typeof loaded.tripSession === "object") {
+      loaded.tripSession = {
+        id: validStoredId(loaded.tripSession.id) ? loaded.tripSession.id : crypto.randomUUID(),
+        startedAt: String(loaded.tripSession.startedAt || new Date().toISOString()),
+        itemIds: [...new Set((Array.isArray(loaded.tripSession.itemIds) ? loaded.tripSession.itemIds : [])
+          .filter((id) => tripIds.has(id)))],
+      };
+      loaded.tripItems.forEach((item) => {
+        if (!loaded.tripSession.itemIds.includes(item.id)) loaded.tripSession.itemIds.push(item.id);
+      });
+    } else if (loaded.tripItems.some((item) => item.packed)) {
+      loaded.tripSession = {
+        id: crypto.randomUUID(),
+        startedAt: loaded.tripItems.find((item) => item.packedAt)?.packedAt || new Date().toISOString(),
+        itemIds: loaded.tripItems.map((item) => item.id),
+      };
+    } else {
+      loaded.tripSession = null;
+    }
 
     delete loaded.contacts;
     return loaded;
@@ -1408,6 +1479,9 @@ function render() {
   const item = items.find((navItem) => navItem.id === currentScreen) || items[0] || NAV_ITEMS[0];
   const showHomeIdentity = currentScreen === "home";
   const showAdmin = currentScreen === "admin";
+  const mobileAppMenu = document.querySelector("#mobile-app-menu");
+  if (mobileAppMenu) mobileAppMenu.hidden = !showHomeIdentity;
+  if (!showHomeIdentity) setMobileMenuOpen(false);
   screenTitle.textContent = showHomeIdentity ? "ניהול הבית" : item.label;
   screenEyebrow.hidden = !(showHomeIdentity || showAdmin);
   screenEyebrow.textContent = showHomeIdentity
@@ -1816,25 +1890,26 @@ function openCalendarDay(key) {
   dialogBody.innerHTML = entries.length
     ? `<div class="calendar-day-dialog-list">${entries.map((event) => {
         const when = event.allDay ? "כל היום" : `${escapeHtml(event.startTime || "")}${event.endTime ? `–${escapeHtml(event.endTime)}` : ""}`;
-        const actions = event.isHoliday ? "" : `<div class="calendar-day-event-actions">
-          <button type="button" class="danger-link-button" data-cancel-event-occurrence="${escapeHtml(event.sourceEventId || event.id)}" data-occurrence-date="${escapeHtml(event.date)}">ביטול האירוע</button>
-        </div>`;
-        return `<article class="calendar-day-dialog-event ${event.isHoliday ? "holiday" : ""}"><div class="calendar-day-event-main"><strong>${escapeHtml(event.title)}</strong><span>${when}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</span></div>${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}${actions}</article>`;
+        return `<article class="calendar-day-dialog-event ${event.isHoliday ? "holiday" : ""}"><div class="calendar-day-event-main"><strong>${escapeHtml(event.title)}</strong><span>${when}${event.location ? ` · ${escapeHtml(event.location)}` : ""}</span></div>${event.notes ? `<p>${escapeHtml(event.notes)}</p>` : ""}</article>`;
       }).join("")}</div>`
     : emptyHtml("אין אירועים ביום זה");
-  dialogBody.querySelectorAll("[data-cancel-event-occurrence]").forEach((button) => button.addEventListener("click", () => {
-    openEventCancellationDialog(button.dataset.cancelEventOccurrence, button.dataset.occurrenceDate);
-  }));
+  if (dialog.open) dialog.close();
   dialog.showModal();
 }
+
 
 /* Shopping */
 /* Shopping */
 function renderShopping() {
   const allActive = state.shopping.filter((item) => !item.purchased);
   const allPurchased = state.shopping.filter((item) => item.purchased);
-  const shoppingTotal = allActive.length + allPurchased.length;
-  const shoppingProgress = shoppingTotal ? Math.round((allPurchased.length / shoppingTotal) * 100) : 0;
+  const sessionActive = Boolean(state.shoppingSession);
+  const sessionIds = new Set(state.shoppingSession?.itemIds || state.shopping.map((item) => item.id));
+  const sessionItems = state.shopping.filter((item) => sessionIds.has(item.id));
+  const sessionPurchased = sessionItems.filter((item) => item.purchased);
+  const sessionRemaining = sessionItems.filter((item) => !item.purchased);
+  const sessionTotal = sessionItems.length;
+
   if (shoppingCategoryFilter !== "הכל" && !allActive.some((item) => (item.category || "אחר") === shoppingCategoryFilter)) {
     shoppingCategoryFilter = "הכל";
   }
@@ -1842,22 +1917,22 @@ function renderShopping() {
     ? allActive
     : allActive.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
   const visiblePurchased = shoppingCategoryFilter === "הכל"
-    ? allPurchased
-    : allPurchased.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
+    ? sessionPurchased
+    : sessionPurchased.filter((item) => (item.category || "אחר") === shoppingCategoryFilter);
+
+  const statusHtml = sessionActive
+    ? `<section class="cycle-status-card active"><div><span class="cycle-status-icon">🛒</span><div><strong>קנייה פעילה</strong><span>נשארו ${sessionRemaining.length} מתוך ${sessionTotal} פריטים</span></div></div><button type="button" class="primary-button compact-button" data-finish-shopping>סיום קנייה</button></section>`
+    : `<section class="cycle-status-card"><div><span class="cycle-status-icon">📝</span><div><strong>${allActive.length} פריטים לקנייה</strong><span>התחילו קנייה כשיוצאים לחנות</span></div></div><button type="button" class="primary-button compact-button" data-start-shopping ${allActive.length ? "" : "disabled"}>התחלת קנייה</button></section>`;
 
   return `<section class="shopping-page option-two-shopping-page">
-    <section class="shopping-basket-progress" aria-label="התקדמות מילוי הסל">
-      <div class="shopping-progress-heading"><div><strong>מילוי הסל</strong><span>${allPurchased.length} מתוך ${shoppingTotal} פריטים בסל</span></div><strong class="progress-number">${shoppingProgress}%</strong></div>
-      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${shoppingProgress}"><span style="width:${shoppingProgress}%"></span></div>
-    </section>
-
+    ${statusHtml}
     <div class="shopping-filter-strip" role="tablist" aria-label="סינון לפי קטגוריה">
       ${shoppingFilterChipsHtml(allActive)}
     </div>
 
     <section class="shopping-unified-card">
       <div class="shopping-unified-title">
-        <div><span class="shopping-basket-icon">🧺</span><h3>לרכישה</h3></div>
+        <div><span class="shopping-basket-icon">🧺</span><h3>${sessionActive ? "נשאר לקנות" : "לרכישה"}</h3></div>
         <span>${visibleActive.length}${shoppingCategoryFilter === "הכל" ? "" : ` מתוך ${allActive.length}`}</span>
       </div>
       <div class="shopping-unified-list">
@@ -1865,17 +1940,95 @@ function renderShopping() {
       </div>
     </section>
 
-    <details class="shopping-purchased-card">
-      <summary><span><span class="purchased-check-icon">✓</span>נרכשו</span><span class="count-pill completed">${visiblePurchased.length}</span></summary>
-      <div class="shopping-unified-list purchased-list">
-        ${shoppingListHtml(visiblePurchased, true) || emptyHtml("עדיין לא סומנו פריטים כנרכשו")}
-      </div>
-    </details>
+    ${sessionActive ? `<details class="shopping-purchased-card" ${sessionPurchased.length ? "" : ""}>
+      <summary><span><span class="purchased-check-icon">✓</span>נרכשו בקנייה הזו</span><span class="count-pill completed">${visiblePurchased.length}</span></summary>
+      <div class="shopping-unified-list purchased-list">${shoppingListHtml(visiblePurchased, true) || emptyHtml("עדיין לא סומנו פריטים כנרכשו")}</div>
+    </details>` : ""}
+
+    ${shoppingHistoryHtml()}
 
     <div class="category-toolbar category-management-toolbar shopping-category-toolbar">
       <button class="secondary-button compact-button" type="button" data-add-shopping-category>＋ הוספת קטגוריה</button>
     </div>
   </section>`;
+}
+
+
+function startShopping(showMessage = true) {
+  if (state.shoppingSession) return;
+  const itemIds = state.shopping.map((item) => item.id);
+  if (!itemIds.length) return showToast("רשימת הקניות ריקה");
+  state.shopping.forEach((item) => {
+    item.purchased = false;
+    item.purchasedAt = null;
+  });
+  state.shoppingSession = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), itemIds };
+  saveState(showMessage ? "הקנייה התחילה" : "");
+  render();
+}
+
+function finishShopping() {
+  if (!state.shoppingSession) return;
+  const sessionIds = new Set(state.shoppingSession.itemIds || []);
+  const purchasedItems = state.shopping.filter((item) => sessionIds.has(item.id) && item.purchased);
+  const remainingItems = state.shopping.filter((item) => !purchasedItems.some((purchased) => purchased.id === item.id));
+  const message = purchasedItems.length
+    ? `לסיים את הקנייה ולהעביר ${purchasedItems.length} פריטים להיסטוריה?`
+    : "לסיים את הקנייה? הפריטים שלא נרכשו יישארו ברשימה.";
+  if (!confirm(message)) return;
+  const endedAt = new Date().toISOString();
+  if (purchasedItems.length) {
+    state.shoppingHistory.push({
+      id: state.shoppingSession.id || crypto.randomUUID(),
+      startedAt: state.shoppingSession.startedAt || endedAt,
+      endedAt,
+      title: "",
+      items: purchasedItems.map((item) => ({ ...item, purchased: true, purchasedAt: item.purchasedAt || endedAt })),
+    });
+  }
+  remainingItems.forEach((item) => {
+    item.purchased = false;
+    item.purchasedAt = null;
+  });
+  state.shopping = remainingItems;
+  state.shoppingSession = null;
+  editingShoppingId = null;
+  saveState("הקנייה הסתיימה");
+  render();
+}
+
+function shoppingHistoryHtml() {
+  const history = [...(state.shoppingHistory || [])].sort((a, b) => String(b.endedAt || "").localeCompare(String(a.endedAt || "")));
+  return `<details class="cycle-history-card shopping-history-card">
+    <summary><span>קניות קודמות</span><span class="count-pill completed">${history.length}</span></summary>
+    <div class="cycle-history-list">${history.map((batch) => {
+      const date = new Date(batch.endedAt || batch.startedAt || Date.now());
+      const title = batch.title || `קנייה מ־${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "long", year: "numeric" }).format(date)}`;
+      return `<details class="cycle-history-batch">
+        <summary><span><strong>${escapeHtml(title)}</strong><small>${batch.items.length} פריטים</small></span><span>⌄</span></summary>
+        <div class="cycle-history-batch-actions"><button type="button" class="secondary-button compact-button" data-restore-shopping-batch="${batch.id}">החזרת כל המוצרים לרשימה</button></div>
+        <div class="cycle-history-items">${batch.items.map((item) => `<div class="cycle-history-item"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span><button type="button" class="link-button" data-restore-shopping-item="${batch.id}" data-history-item-id="${item.id}">החזרה</button></div>`).join("")}</div>
+      </details>`;
+    }).join("") || emptyHtml("אין עדיין קניות קודמות")}</div>
+  </details>`;
+}
+
+function restoreShoppingHistoryItems(batchId, itemId = "") {
+  const batch = (state.shoppingHistory || []).find((entry) => entry.id === batchId);
+  if (!batch) return;
+  const items = itemId ? batch.items.filter((item) => item.id === itemId) : batch.items;
+  items.forEach((archived) => {
+    const existing = state.shopping.find((item) => !item.purchased && normalizeName(item.name) === normalizeName(archived.name) && (item.category || "אחר") === (archived.category || "אחר"));
+    if (existing) existing.quantity = positiveInteger(existing.quantity) + positiveInteger(archived.quantity);
+    else state.shopping.push({ ...archived, id: crypto.randomUUID(), purchased: false, purchasedAt: null });
+  });
+  if (state.shoppingSession) {
+    const ids = new Set(state.shoppingSession.itemIds || []);
+    state.shopping.forEach((item) => ids.add(item.id));
+    state.shoppingSession.itemIds = [...ids];
+  }
+  saveState(items.length === 1 ? "המוצר הוחזר לרשימה" : "המוצרים הוחזרו לרשימה");
+  render();
 }
 
 function shoppingFilterChipsHtml(activeItems) {
@@ -2039,43 +2192,90 @@ function filterShoppingRows() {
 }
 
 /* Events */
-function renderEvents() {
-  const events = [...state.events].sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
-  if (!events.length) return `<section class="events-page"><section class="card events-card clean-list-card">${emptyHtml("אין אירועים")}</section></section>`;
+function eventOccurrencesBetween(startDate, endDate, maxOccurrences = 5000) {
+  const start = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 12);
+  const end = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate(), 12);
+  const occurrences = [];
+  if (end < start) return occurrences;
+  for (let cursor = new Date(start); cursor <= end && occurrences.length < maxOccurrences; cursor.setDate(cursor.getDate() + 1)) {
+    const key = dateKey(cursor);
+    state.events.forEach((event) => {
+      if (occurrences.length >= maxOccurrences) return;
+      if (eventOccursOnDate(event, key)) occurrences.push(eventOccurrenceForDate(event, key));
+    });
+  }
+  return occurrences.sort((a, b) => `${a.date}T${a.allDay ? "00:00" : (a.startTime || "00:00")}`.localeCompare(`${b.date}T${b.allDay ? "00:00" : (b.startTime || "00:00")}`));
+}
 
-  const groups = events.reduce((months, event) => {
+function eventMonthGroupHtml(monthKey, monthEvents, { emptyMessage = "אין אירועים בחודש זה" } = {}) {
+  const [year, month] = monthKey.split("-").map(Number);
+  const monthDate = new Date(year, Math.max(0, month - 1), 1, 12);
+  const monthTitle = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(monthDate);
+  return `<section class="events-month-group">
+    <div class="events-month-heading"><h3>${escapeHtml(monthTitle)}</h3><span>${monthEvents.length} אירועים</span></div>
+    <section class="card events-card clean-list-card">
+      ${monthEvents.length ? `<div class="event-list-header"><span>תאריך</span><span>אירוע</span><span></span></div><div class="compact-event-list">${monthEvents.map(eventFullHtml).join("")}</div>` : emptyHtml(emptyMessage)}
+    </section>
+  </section>`;
+}
+
+function groupEventOccurrencesByMonth(events) {
+  return events.reduce((months, event) => {
     const key = String(event.date || "").slice(0, 7) || "ללא-תאריך";
     if (!months.has(key)) months.set(key, []);
     months.get(key).push(event);
     return months;
   }, new Map());
-
-  return `<section class="events-page"><div class="events-month-list">${[...groups.entries()].map(([key, monthEvents]) => {
-    const firstDate = new Date(`${monthEvents[0].date}T12:00:00`);
-    const monthTitle = new Intl.DateTimeFormat("he-IL", { month: "long", year: "numeric" }).format(firstDate);
-    return `<section class="events-month-group">
-      <div class="events-month-heading"><h3>${escapeHtml(monthTitle)}</h3><span>${monthEvents.length} אירועים</span></div>
-      <section class="card events-card clean-list-card">
-        <div class="event-list-header"><span>תאריך</span><span>אירוע</span><span></span></div>
-        <div class="compact-event-list">${monthEvents.map(eventFullHtml).join("")}</div>
-      </section>
-    </section>`;
-  }).join("")}</div></section>`;
 }
+
+function renderEvents() {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1, 12);
+  const futureEnd = new Date(now.getFullYear(), now.getMonth() + 12, 0, 12);
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const earliestStoredDate = state.events
+    .map((event) => new Date(`${event.date}T12:00:00`))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((a, b) => a - b)[0] || today;
+  const historyStart = earliestStoredDate < currentMonthStart ? earliestStoredDate : currentMonthStart;
+
+  const upcoming = eventOccurrencesBetween(today, futureEnd);
+  const past = yesterday >= historyStart ? eventOccurrencesBetween(historyStart, yesterday) : [];
+  const upcomingGroups = groupEventOccurrencesByMonth(upcoming);
+  const pastGroups = groupEventOccurrencesByMonth(past);
+  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const futureKeys = [...upcomingGroups.keys()].sort();
+  const orderedFutureKeys = [currentMonthKey, ...futureKeys.filter((key) => key !== currentMonthKey)];
+
+  const futureHtml = orderedFutureKeys.map((key) => eventMonthGroupHtml(key, upcomingGroups.get(key) || [])).join("");
+  const pastKeys = [...pastGroups.keys()].sort().reverse();
+  const pastHtml = pastKeys.length
+    ? `<details class="events-history-card"><summary><span>אירועים קודמים</span><span class="count-pill completed">${past.length}</span></summary><div class="events-history-months">${pastKeys.map((key) => eventMonthGroupHtml(key, pastGroups.get(key) || [])).join("")}</div></details>`
+    : `<details class="events-history-card"><summary><span>אירועים קודמים</span><span class="count-pill completed">0</span></summary>${emptyHtml("אין אירועים קודמים")}</details>`;
+
+  return `<section class="events-page"><div class="events-month-list">${futureHtml}</div>${pastHtml}</section>`;
+}
+
 
 function eventFullHtml(event) {
   const date = new Date(`${event.date}T12:00:00`);
-  return `<div class="compact-event-row event-summary-row" data-view-event="${event.id}" role="button" tabindex="0" aria-label="פתיחת פרטי האירוע ${escapeHtml(event.title)}">
+  const sourceId = event.sourceEventId || event.id;
+  return `<div class="compact-event-row event-summary-row" data-view-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}" role="button" tabindex="0" aria-label="פתיחת פרטי האירוע ${escapeHtml(event.title)}">
     <div class="compact-event-date"><strong>${date.getDate()}</strong><span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(date)}</span></div>
-    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}</div></div>
-    ${moreMenuHtml(`<button type="button" data-edit-event="${event.id}">עריכה</button><button type="button" data-download-ics="${event.id}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${event.id}">ביטול אירוע</button>`)}
+    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}${event.recurring && event.recurring !== "none" ? ` <span class="recurring-event-mark" title="אירוע חוזר">↻</span>` : ""}</div></div>
+    ${moreMenuHtml(`<button type="button" data-edit-event="${sourceId}">עריכה</button><button type="button" data-download-ics="${sourceId}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}">ביטול אירוע</button>`)}
   </div>`;
 }
 
-function openEventDetails(id) {
+
+function openEventDetails(id, occurrenceDate = "") {
   const event = state.events.find((existing) => existing.id === id);
   if (!event) return;
-  const date = new Date(`${event.date}T12:00:00`);
+  const displayDate = occurrenceDate || event.date;
+  const date = new Date(`${displayDate}T12:00:00`);
   const dateLabel = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(date);
   const timeLabel = event.allDay
     ? "כל היום"
@@ -2096,6 +2296,7 @@ function openEventDetails(id) {
   if (dialog.open) dialog.close();
   dialog.showModal();
 }
+
 
 /* Tasks */
 function taskCategories() {
@@ -2265,17 +2466,23 @@ function tripCategoryOptions(selected = "") {
 }
 
 function renderTrip() {
-  const packed = state.tripItems.filter((item) => item.packed).length;
+  const sessionActive = Boolean(state.tripSession);
+  const unpackedItems = state.tripItems.filter((item) => !item.packed);
+  const packedItems = state.tripItems.filter((item) => item.packed);
   const total = state.tripItems.length;
-  const progress = total ? Math.round((packed / total) * 100) : 0;
   const categories = tripCategories();
-  const visibleCategories = categories.filter((category) => state.tripItems.some((item) => item.category === category));
+  const visibleCategories = categories.filter((category) => unpackedItems.some((item) => item.category === category));
+  const statusHtml = sessionActive
+    ? `<section class="cycle-status-card active"><div><span class="cycle-status-icon">🧳</span><div><strong>אריזה פעילה</strong><span>נשארו לארוז ${unpackedItems.length} מתוך ${total} פריטים</span></div></div><button class="primary-button compact-button" type="button" data-finish-trip>סיום הטיול</button></section>`
+    : `<section class="cycle-status-card"><div><span class="cycle-status-icon">📋</span><div><strong>${total} פריטים להכנה</strong><span>התחילו אריזה כשתתחילו להתכונן</span></div></div><button class="primary-button compact-button" type="button" data-start-trip ${total ? "" : "disabled"}>התחלת אריזה</button></section>`;
+
   return `<section class="trip-page">
+    ${statusHtml}
     <section class="card trip-list-card clean-list-card">
-      <div class="trip-list-head"><span class="muted small">${packed} מתוך ${total} פריטים ארוזים</span><div class="trip-head-actions"><strong class="progress-number">${progress}%</strong><button class="secondary-button compact-button" type="button" data-reset-trip>איפוס רשימה</button></div></div>
-      <div class="progress-track"><span style="width:${progress}%"></span></div>
-      <div class="trip-category-list">${visibleCategories.map(tripCategoryHtml).join("") || emptyHtml("הרשימה הפעילה ריקה")}</div>
+      <div class="trip-list-head"><strong>${sessionActive ? "נשאר לארוז" : "רשימת הטיול"}</strong><span class="muted small">${unpackedItems.length} פריטים</span></div>
+      <div class="trip-category-list">${visibleCategories.map((category) => tripCategoryHtml(category)).join("") || emptyHtml("הרשימה הפעילה ריקה")}</div>
     </section>
+    ${sessionActive ? `<details class="trip-packed-card"><summary><span><span class="purchased-check-icon">✓</span>נארזו לטיול הזה</span><span class="count-pill completed">${packedItems.length}</span></summary><div class="trip-packed-list">${packedItems.map(tripItemHtml).join("") || emptyHtml("עדיין לא נארזו פריטים")}</div></details>` : ""}
     ${tripArchiveHtml()}
     <div class="category-toolbar category-management-toolbar trip-category-toolbar">
       <button type="button" class="secondary-button compact-button" data-add-trip-category>＋ הוספת קטגוריה</button>
@@ -2286,12 +2493,14 @@ function renderTrip() {
   </section>`;
 }
 
+
 function tripCategoryHtml(category) {
-  const items = state.tripItems.filter((item) => item.category === category).sort((a, b) => Number(a.packed) - Number(b.packed) || collator.compare(a.name, b.name));
+  const items = state.tripItems.filter((item) => item.category === category && !item.packed).sort((a, b) => collator.compare(a.name, b.name));
   if (!items.length) return "";
   const icon = { אוכל: "🥪", רחצה: "🧴", תרופות: "💊", בגדים: "👕", ציוד: "🎒" }[category] || "📦";
   return `<section class="trip-category-section"><div class="trip-category-header"><span>${icon}</span><h3>${escapeHtml(category)}</h3><small>${items.length}</small></div><div class="trip-list">${items.map(tripItemHtml).join("")}</div></section>`;
 }
+
 
 function tripItemHtml(item) {
   return `<div class="trip-row" data-trip-id="${item.id}">
@@ -2306,16 +2515,88 @@ function tripItemHtml(item) {
 }
 
 function tripArchiveHtml() {
-  const archive = [...state.tripArchive].sort((a, b) => (b.archivedAt || "").localeCompare(a.archivedAt || "") || collator.compare(a.name, b.name));
-  return `<details class="card trip-archive-card" ${archivedTripSelection.size ? "open" : ""}>
-    <summary>ארכיון <span class="count-pill completed">${archive.length}</span></summary>
-    <div class="archive-actions">
-      <button type="button" class="secondary-button compact-button" data-restore-selected-trip ${archivedTripSelection.size ? "" : "disabled"}>החזרת מסומנים</button>
-      <button type="button" class="secondary-button compact-button" data-restore-all-trip ${archive.length ? "" : "disabled"}>החזרת כל הפריטים</button>
-      <button type="button" class="danger-button compact-button" data-delete-archived-trip ${archivedTripSelection.size ? "" : "disabled"}>מחיקה לצמיתות</button>
-    </div>
-    <div class="trip-archive-list">${archive.map((item) => `<label class="trip-archive-row"><input type="checkbox" data-trip-archive-select="${item.id}" ${archivedTripSelection.has(item.id) ? "checked" : ""}/><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span></label>`).join("") || emptyHtml("הארכיון ריק")}</div>
+  const archive = [...state.tripArchive].sort((a, b) => String(b.archivedAt || "").localeCompare(String(a.archivedAt || "")) || collator.compare(a.name, b.name));
+  const batches = archive.reduce((map, item) => {
+    const batchId = item.archiveBatchId || `legacy-${String(item.archivedAt || "").slice(0, 10) || "items"}`;
+    if (!map.has(batchId)) map.set(batchId, []);
+    map.get(batchId).push(item);
+    return map;
+  }, new Map());
+  const groups = [...batches.entries()];
+  return `<details class="card trip-archive-card cycle-history-card" ${archivedTripSelection.size ? "open" : ""}>
+    <summary><span>טיולים קודמים</span><span class="count-pill completed">${groups.length}</span></summary>
+    ${archivedTripSelection.size ? `<div class="archive-actions"><button type="button" class="secondary-button compact-button" data-restore-selected-trip>החזרת מסומנים</button><button type="button" class="danger-button compact-button" data-delete-archived-trip>מחיקה לצמיתות</button></div>` : ""}
+    <div class="cycle-history-list">${groups.map(([batchId, items]) => {
+      const first = items[0];
+      const date = new Date(first.archivedAt || Date.now());
+      const title = first.archiveTitle || `טיול מ־${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "long", year: "numeric" }).format(date)}`;
+      return `<details class="cycle-history-batch">
+        <summary><span><strong>${escapeHtml(title)}</strong><small>${items.length} פריטים</small></span><span>⌄</span></summary>
+        <div class="cycle-history-batch-actions"><button type="button" class="secondary-button compact-button" data-restore-trip-batch="${escapeHtml(batchId)}">החזרת כל הרשימה</button><button type="button" class="danger-link-button" data-delete-trip-batch="${escapeHtml(batchId)}">מחיקת הטיול</button></div>
+        <div class="trip-archive-list">${items.map((item) => `<label class="trip-archive-row"><input type="checkbox" data-trip-archive-select="${item.id}" ${archivedTripSelection.has(item.id) ? "checked" : ""}/><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.category)} · כמות ${positiveInteger(item.quantity)}</small></span></label>`).join("")}</div>
+      </details>`;
+    }).join("") || emptyHtml("אין עדיין טיולים קודמים")}</div>
   </details>`;
+}
+
+
+function startTripPacking(showMessage = true) {
+  if (state.tripSession) return;
+  if (!state.tripItems.length) return showToast("רשימת הטיול ריקה");
+  state.tripItems.forEach((item) => {
+    item.packed = false;
+    item.packedAt = null;
+  });
+  state.tripSession = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), itemIds: state.tripItems.map((item) => item.id) };
+  saveState(showMessage ? "האריזה התחילה" : "");
+  render();
+}
+
+function finishTrip() {
+  if (!state.tripSession) return;
+  if (!state.tripItems.length) {
+    state.tripSession = null;
+    saveState("הטיול הסתיים");
+    render();
+    return;
+  }
+  const suggested = `טיול ${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "numeric", year: "2-digit" }).format(new Date())}`;
+  const enteredTitle = window.prompt("שם הטיול לארכיון (אפשר להשאיר את השם המוצע):", suggested);
+  if (enteredTitle === null) return;
+  const archiveTitle = String(enteredTitle || suggested).trim() || suggested;
+  if (!confirm(`לסיים את „${archiveTitle}” ולהעביר את הרשימה לארכיון?`)) return;
+  const archivedAt = new Date().toISOString();
+  const archiveBatchId = state.tripSession.id || crypto.randomUUID();
+  state.tripArchive.push(...state.tripItems.map((item) => ({
+    ...item,
+    packed: false,
+    packedAt: null,
+    archivedAt,
+    archiveBatchId,
+    archiveTitle,
+  })));
+  state.tripItems = [];
+  state.tripSession = null;
+  archivedTripSelection.clear();
+  saveState("הטיול הסתיים ונשמר בארכיון");
+  render();
+}
+
+function restoreTripBatch(batchId) {
+  const ids = state.tripArchive.filter((item) => (item.archiveBatchId || `legacy-${String(item.archivedAt || "").slice(0, 10) || "items"}`) === batchId).map((item) => item.id);
+  restoreTripItems(ids);
+}
+
+function deleteTripBatch(batchId) {
+  const items = state.tripArchive.filter((item) => (item.archiveBatchId || `legacy-${String(item.archivedAt || "").slice(0, 10) || "items"}`) === batchId);
+  if (!items.length) return;
+  const title = items[0].archiveTitle || "הטיול הזה";
+  if (!confirm(`למחוק לצמיתות את ${title}?`)) return;
+  const ids = new Set(items.map((item) => item.id));
+  state.tripArchive = state.tripArchive.filter((item) => !ids.has(item.id));
+  items.forEach((item) => archivedTripSelection.delete(item.id));
+  saveState("הטיול נמחק מהארכיון");
+  render();
 }
 
 function addTripCategory() {
@@ -2385,6 +2666,10 @@ function attachScreenEvents() {
     });
   });
 
+  document.querySelector("[data-start-shopping]")?.addEventListener("click", () => startShopping());
+  document.querySelector("[data-finish-shopping]")?.addEventListener("click", finishShopping);
+  document.querySelectorAll("[data-restore-shopping-batch]").forEach((button) => button.addEventListener("click", () => restoreShoppingHistoryItems(button.dataset.restoreShoppingBatch)));
+  document.querySelectorAll("[data-restore-shopping-item]").forEach((button) => button.addEventListener("click", () => restoreShoppingHistoryItems(button.dataset.restoreShoppingItem, button.dataset.historyItemId)));
   document.querySelectorAll("[data-shopping-toggle]").forEach((button) => button.addEventListener("click", () => toggleShopping(button.dataset.shoppingToggle)));
   document.querySelectorAll("[data-shopping-quantity]").forEach((button) => button.addEventListener("click", () => updateShoppingQuantity(button.dataset.shoppingQuantity, button.dataset.delta)));
   document.querySelectorAll("[data-edit-shopping]").forEach((button) => button.addEventListener("click", () => openInlineShoppingEdit(button.dataset.editShopping)));
@@ -2404,12 +2689,12 @@ function attachScreenEvents() {
   document.querySelectorAll("[data-view-event]").forEach((row) => {
     row.addEventListener("click", (event) => {
       if (event.target.closest(".more-menu")) return;
-      openEventDetails(row.dataset.viewEvent);
+      openEventDetails(row.dataset.viewEvent, row.dataset.occurrenceDate || "");
     });
     row.addEventListener("keydown", (event) => {
       if ((event.key === "Enter" || event.key === " ") && !event.target.closest(".more-menu")) {
         event.preventDefault();
-        openEventDetails(row.dataset.viewEvent);
+        openEventDetails(row.dataset.viewEvent, row.dataset.occurrenceDate || "");
       }
     });
   });
@@ -2417,7 +2702,7 @@ function attachScreenEvents() {
   document.querySelectorAll("[data-delete-event]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     const calendarEvent = state.events.find((item) => item.id === button.dataset.deleteEvent);
-    openEventCancellationDialog(button.dataset.deleteEvent, calendarEvent?.date || "");
+    openEventCancellationDialog(button.dataset.deleteEvent, button.dataset.occurrenceDate || calendarEvent?.date || "");
   }));
   document.querySelectorAll("[data-download-ics]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); downloadICS(button.dataset.downloadIcs); }));
 
@@ -2435,11 +2720,14 @@ function attachScreenEvents() {
   document.querySelector("[data-rename-wish-category]")?.addEventListener("click", renameWishCategory);
   document.querySelector("[data-delete-wish-category]")?.addEventListener("click", deleteWishCategory);
 
+  document.querySelector("[data-start-trip]")?.addEventListener("click", () => startTripPacking());
+  document.querySelector("[data-finish-trip]")?.addEventListener("click", finishTrip);
+  document.querySelectorAll("[data-restore-trip-batch]").forEach((button) => button.addEventListener("click", () => restoreTripBatch(button.dataset.restoreTripBatch)));
+  document.querySelectorAll("[data-delete-trip-batch]").forEach((button) => button.addEventListener("click", () => deleteTripBatch(button.dataset.deleteTripBatch)));
   document.querySelectorAll("[data-trip-toggle]").forEach((button) => button.addEventListener("click", () => toggleTrip(button.dataset.tripToggle)));
   document.querySelectorAll("[data-trip-quantity]").forEach((button) => button.addEventListener("click", () => updateTripQuantity(button.dataset.tripQuantity, button.dataset.delta)));
   document.querySelectorAll("[data-edit-trip]").forEach((button) => button.addEventListener("click", () => openEditDialog("trip", button.dataset.editTrip)));
   document.querySelectorAll("[data-delete-trip]").forEach((button) => button.addEventListener("click", () => deleteTripItem(button.dataset.deleteTrip)));
-  document.querySelector("[data-reset-trip]")?.addEventListener("click", resetTripList);
   document.querySelector("[data-add-trip-category]")?.addEventListener("click", addTripCategory);
   document.querySelector("[data-rename-trip-category]")?.addEventListener("click", renameTripCategory);
   document.querySelector("[data-delete-trip-category]")?.addEventListener("click", deleteTripCategory);
@@ -2457,11 +2745,19 @@ function attachScreenEvents() {
 function toggleShopping(id) {
   const item = state.shopping.find((existing) => existing.id === id);
   if (!item) return;
+  if (!state.shoppingSession && !item.purchased) {
+    state.shoppingSession = {
+      id: crypto.randomUUID(),
+      startedAt: new Date().toISOString(),
+      itemIds: state.shopping.map((entry) => entry.id),
+    };
+  }
   item.purchased = !item.purchased;
   item.purchasedAt = item.purchased ? new Date().toISOString() : null;
-  saveState(item.purchased ? "המוצר הועבר לנרכשו" : "המוצר הוחזר לרשימת הקניות");
+  saveState(item.purchased ? "המוצר הועבר לנרכשו בקנייה הזו" : "המוצר הוחזר לרשימת הקניות");
   render();
 }
+
 
 function toggleTask(id) {
   const task = state.tasks.find((existing) => existing.id === id);
@@ -2588,11 +2884,15 @@ function persistTaskOrderFromDom() {
 function toggleTrip(id) {
   const item = state.tripItems.find((existing) => existing.id === id);
   if (!item) return;
+  if (!state.tripSession && !item.packed) {
+    state.tripSession = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), itemIds: state.tripItems.map((entry) => entry.id) };
+  }
   item.packed = !item.packed;
   item.packedAt = item.packed ? new Date().toISOString() : null;
   saveState(item.packed ? "הפריט סומן כארוז" : "הפריט הוחזר לציוד שצריך לארוז");
   render();
 }
+
 
 function deleteTripItem(id) {
   const item = state.tripItems.find((existing) => existing.id === id);
@@ -2614,22 +2914,9 @@ function archiveTripItem(id) {
 }
 
 function resetTripList() {
-  if (!state.tripItems.length) return showToast("רשימת הטיול כבר ריקה");
-  if (!confirm("לאפס את הרשימה הפעילה ולהעביר את כל הפריטים לארכיון?")) return;
-  const archivedAt = new Date().toISOString();
-  const archiveBatchId = crypto.randomUUID();
-  state.tripArchive.push(...state.tripItems.map((item) => ({
-    ...item,
-    packed: false,
-    packedAt: null,
-    archivedAt,
-    archiveBatchId,
-  })));
-  state.tripItems = [];
-  archivedTripSelection.clear();
-  saveState("הרשימה אופסה והפריטים הועברו לארכיון");
-  render();
+  finishTrip();
 }
+
 
 function updateTripQuantity(id, delta) {
   const item = state.tripItems.find((existing) => existing.id === id);
@@ -2643,19 +2930,27 @@ function restoreTripItems(ids) {
   const idSet = new Set(ids);
   const restored = state.tripArchive.filter((item) => idSet.has(item.id));
   if (!restored.length) return;
-  const activeIds = new Set(state.tripItems.map((item) => item.id));
+  const restoredActiveIds = [];
   restored.forEach((item) => {
-    const restoredItem = { ...item, packed: false, packedAt: null };
+    const existing = state.tripItems.find((activeItem) => normalizeName(activeItem.name) === normalizeName(item.name) && activeItem.category === item.category);
+    if (existing) {
+      existing.quantity = Math.max(positiveInteger(existing.quantity), positiveInteger(item.quantity));
+      existing.packed = false;
+      existing.packedAt = null;
+      restoredActiveIds.push(existing.id);
+      return;
+    }
+    const restoredItem = { ...item, id: crypto.randomUUID(), packed: false, packedAt: null };
     delete restoredItem.archivedAt;
     delete restoredItem.archiveBatchId;
-    if (activeIds.has(restoredItem.id)) restoredItem.id = crypto.randomUUID();
-    activeIds.add(restoredItem.id);
+    delete restoredItem.archiveTitle;
+    restoredActiveIds.push(restoredItem.id);
     state.tripItems.push(restoredItem);
     if (!state.tripCategories.includes(restoredItem.category)) state.tripCategories.push(restoredItem.category);
   });
-  state.tripArchive = state.tripArchive.filter((item) => !idSet.has(item.id));
   ids.forEach((id) => archivedTripSelection.delete(id));
-  saveState("הפריטים הוחזרו לרשימה הפעילה");
+  if (state.tripSession) state.tripSession.itemIds = [...new Set([...(state.tripSession.itemIds || []), ...restoredActiveIds])];
+  saveState("הפריטים הועתקו לרשימה הפעילה");
   render();
 }
 
@@ -2746,6 +3041,7 @@ function openEventCancellationDialog(eventId, occurrenceDate = "") {
 function deleteFrom(collection, id) {
   if (!confirm("למחוק את הפריט?")) return;
   state[collection] = state[collection].filter((item) => item.id !== id);
+  if (collection === "shopping" && state.shoppingSession) state.shoppingSession.itemIds = (state.shoppingSession.itemIds || []).filter((itemId) => itemId !== id);
   if (collection === "tasks") expandedTaskIds.delete(id);
   saveState("הפריט נמחק");
   render();
@@ -2851,11 +3147,12 @@ function submitShopping(formData, force = false) {
   if (duplicate && !force) {
     const container = document.querySelector("#duplicate-container");
     container.innerHTML = `<div class="duplicate-warning"><strong>המוצר כבר נמצא ברשימת הקניות.</strong><div class="toolbar" style="margin:10px 0 0"><button type="button" class="primary-button" id="force-add">הוסף בכל זאת</button><button type="button" class="secondary-button" id="cancel-duplicate">לא להוסיף</button></div></div>`;
-    container.querySelector("#force-add").onclick = () => { state.shopping.push(item); queueShoppingPushNotification(item.name); saveState("המוצר נוסף למרות הכפילות"); dialog.close(); render(); };
+    container.querySelector("#force-add").onclick = () => { state.shopping.push(item); if (state.shoppingSession) state.shoppingSession.itemIds = [...new Set([...(state.shoppingSession.itemIds || []), item.id])]; queueShoppingPushNotification(item.name); saveState("המוצר נוסף למרות הכפילות"); dialog.close(); render(); };
     container.querySelector("#cancel-duplicate").onclick = () => dialog.close();
     return;
   }
   state.shopping.push(item);
+  if (state.shoppingSession) state.shoppingSession.itemIds = [...new Set([...(state.shoppingSession.itemIds || []), item.id])];
   queueShoppingPushNotification(item.name);
   saveState("המוצר נוסף לרשימת הקניות");
   dialog.close();
@@ -2876,7 +3173,10 @@ function submitShoppingEdit(id, formData) {
     category: formData.get("category") || "אחר",
     purchased,
   });
-  if (!wasPurchased && purchased) item.purchasedAt = new Date().toISOString();
+  if (!wasPurchased && purchased) {
+    if (!state.shoppingSession) state.shoppingSession = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), itemIds: state.shopping.map((entry) => entry.id) };
+    item.purchasedAt = new Date().toISOString();
+  }
   if (wasPurchased && !purchased) item.purchasedAt = null;
   saveState("המוצר עודכן");
   dialog.close();
@@ -3063,10 +3363,15 @@ function submitTripItem(formData, id = null) {
     const packed = formData.get("packed") === "on";
     const wasPacked = item.packed;
     Object.assign(item, values, { packed });
-    if (!wasPacked && packed) item.packedAt = new Date().toISOString();
+    if (!wasPacked && packed) {
+      if (!state.tripSession) state.tripSession = { id: crypto.randomUUID(), startedAt: new Date().toISOString(), itemIds: state.tripItems.map((entry) => entry.id) };
+      item.packedAt = new Date().toISOString();
+    }
     if (wasPacked && !packed) item.packedAt = null;
   } else {
-    state.tripItems.push({ id: crypto.randomUUID(), ...values, packed: false, packedAt: null });
+    const newItem = { id: crypto.randomUUID(), ...values, packed: false, packedAt: null };
+    state.tripItems.push(newItem);
+    if (state.tripSession) state.tripSession.itemIds = [...new Set([...(state.tripSession.itemIds || []), newItem.id])];
   }
   saveState(id ? "פריט הציוד עודכן" : "פריט נוסף לרשימת הטיול");
   dialog.close();
