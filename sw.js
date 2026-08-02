@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-24-multiday-flat-history";
+const CACHE = "nihul-habayit-v15-25-google-calendar-sync";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {
