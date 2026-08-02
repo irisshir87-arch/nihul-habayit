@@ -56,6 +56,12 @@ const APP_RELEASES = Object.freeze([
       { icon: "🏠", text: "שם משפחת זילכה הוסר גם ממסך הטעינה הראשוני של האפליקציה." },
     ],
   },
+  {
+    version: "15.21",
+    updates: [
+      { icon: "🔔", text: "תוקנה שליחת ההתראות למשתמשים אחרים במשפחה ונוספה הודעת הצלחה או שגיאה ברורה." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -443,10 +449,24 @@ function notificationOptInHtml() {
 }
 
 async function sendHouseholdNotification(payload, { showNoRecipients = false } = {}) {
-  if (!SUPABASE_ENABLED || !supabaseClient || !currentUser || !currentHouseholdId) return null;
+  if (!SUPABASE_ENABLED || !supabaseClient || !currentUser || !currentHouseholdId) {
+    if (showNoRecipients) showToast("הפריט נשמר, אך חסרים פרטי התחברות לשליחת ההתראה");
+    return null;
+  }
   try {
-    const { data, error } = await supabaseClient.functions.invoke(PUSH_FUNCTION_NAME, {
-      body: {
+    const { data: sessionData, error: sessionError } = await supabaseClient.auth.getSession();
+    if (sessionError) throw sessionError;
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) throw new Error("לא נמצא אסימון התחברות פעיל");
+
+    const response = await fetch(`${APP_CONFIG.supabaseUrl}/functions/v1/${PUSH_FUNCTION_NAME}`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${accessToken}`,
+        "apikey": APP_CONFIG.supabasePublishableKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
         householdId: currentHouseholdId,
         kind: payload.kind,
         title: payload.title,
@@ -455,18 +475,33 @@ async function sendHouseholdNotification(payload, { showNoRecipients = false } =
         entityId: payload.entityId || null,
         dedupeKey: payload.dedupeKey || null,
         metadata: payload.metadata || {},
-      },
+      }),
     });
-    if (error) throw error;
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (error) {
+      data = null;
+    }
+    if (!response.ok) {
+      throw new Error(data?.error || `שליחת ההתראה נכשלה (${response.status})`);
+    }
+
     if (showNoRecipients && data?.noRecipients) {
       showToast("נשמר. המשתמש השני עדיין לא הפעיל התראות במכשיר שלו");
     } else if (showNoRecipients && Number(data?.failed || 0) > 0 && !Number(data?.sent || 0)) {
       showToast("נשמר, אך שליחת ההתראה לא הצליחה");
+    } else if (showNoRecipients && Number(data?.sent || 0) > 0) {
+      showToast("נשמרה ונשלחה התראה");
     }
     return data;
   } catch (error) {
     console.warn("Could not send household notification", error);
-    if (showNoRecipients) showToast("הפריט נשמר, אך ההתראה לא נשלחה");
+    if (showNoRecipients) {
+      const message = error instanceof Error ? error.message : "שגיאה לא ידועה";
+      showToast(`הפריט נשמר, אך ההתראה לא נשלחה: ${message}`);
+    }
     return null;
   }
 }
