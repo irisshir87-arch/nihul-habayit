@@ -92,6 +92,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "🔒", text: "החיבור ליומן הוא לקריאה בלבד; עריכה ומחיקה נשארות ב-Google Calendar." },
     ],
   },
+  {
+    version: "15.26",
+    updates: [
+      { icon: "🧹", text: "תוקנה הופעה כפולה של אירועים שיובאו מיומן Google." },
+      { icon: "🔄", text: "אירועים חדשים ב-Google Calendar מסתנכרנים אוטומטית בפתיחת האפליקציה ובעמוד האירועים." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -101,6 +108,7 @@ const WHATS_NEW_STORAGE_PREFIX = "nihul-habayit-whats-new-seen";
 const PUSH_VAPID_PUBLIC_KEY = "BLCrC64_BfAUfG8NyKmUCY-WCyZPk6tDzk5cPLXur8i4daSv9rSFRkDlNwb1naz6xKUV3GojIGQbVdO35NImXeA";
 const PUSH_FUNCTION_NAME = "send-household-notification";
 const GOOGLE_CALENDAR_FUNCTION_NAME = "google-calendar-oauth-callback";
+const GOOGLE_CALENDAR_AUTO_SYNC_INTERVAL_MS = 2 * 60 * 1000;
 const SHOPPING_PUSH_STORAGE_PREFIX = "nihul-habayit-shopping-push";
 const SHOPPING_PUSH_DELAY_MS = 45_000;
 
@@ -255,6 +263,8 @@ let shoppingPushTimer = null;
 let googleCalendarEvents = [];
 let googleCalendarConnection = { loaded: false, loading: false, connected: false, connection: null };
 let googleCalendarActionInProgress = false;
+let googleCalendarLastAutoSyncAt = 0;
+let googleCalendarAutoSyncPromise = null;
 
 
 function pushNotificationsSupported() {
@@ -1288,6 +1298,8 @@ function showLogin(message = "") {
   googleCalendarEvents = [];
   googleCalendarConnection = { loaded: false, loading: false, connected: false, connection: null };
   googleCalendarActionInProgress = false;
+  googleCalendarLastAutoSyncAt = 0;
+  googleCalendarAutoSyncPromise = null;
   clearTimeout(shoppingPushTimer);
   shoppingPushTimer = null;
   configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
@@ -1502,6 +1514,7 @@ function navigate(screen) {
   currentScreen = screen;
   location.hash = screen;
   render();
+  if (screen === "events") window.setTimeout(() => autoSyncGoogleCalendar({ force: true }), 0);
 }
 
 function render() {
@@ -2372,6 +2385,7 @@ function normalizeGoogleCalendarEvent(row) {
     readOnly: true,
     htmlLink: row.html_link || "",
     googleCalendarId: row.google_calendar_id || "",
+    googleEventId: row.google_event_id || "",
     connectionUserId: row.connection_user_id || "",
   };
 }
@@ -2383,35 +2397,74 @@ async function loadGoogleCalendarEvents() {
   }
   const { data, error } = await supabaseClient
     .from("google_calendar_events")
-    .select("id, connection_user_id, google_calendar_id, title, description, location, is_all_day, start_at, end_at, start_date, end_date, html_link")
+    .select("id, connection_user_id, google_calendar_id, google_event_id, title, description, location, is_all_day, start_at, end_at, start_date, end_date, html_link")
     .eq("household_id", currentHouseholdId);
   if (error) throw error;
-  googleCalendarEvents = (data || [])
-    .map(normalizeGoogleCalendarEvent)
-    .filter((event) => event.date)
+
+  const uniqueEvents = new Map();
+  for (const row of data || []) {
+    const event = normalizeGoogleCalendarEvent(row);
+    if (!event.date) continue;
+    const stableId = event.googleEventId || event.googleRowId;
+    const key = `${event.connectionUserId}|${stableId}|${event.date}|${event.startTime || "00:00"}`;
+    const existing = uniqueEvents.get(key);
+    if (!existing || (existing.googleCalendarId === "primary" && event.googleCalendarId !== "primary")) {
+      uniqueEvents.set(key, event);
+    }
+  }
+
+  googleCalendarEvents = [...uniqueEvents.values()]
     .sort((a, b) => `${a.date}T${a.startTime || "00:00"}`.localeCompare(`${b.date}T${b.startTime || "00:00"}`));
   return googleCalendarEvents;
 }
 
-async function loadGoogleCalendarIntegration({ silent = false } = {}) {
+async function loadGoogleCalendarIntegration({ silent = false, sync = true } = {}) {
   if (!SUPABASE_ENABLED || !currentUser || !currentHouseholdId || googleCalendarConnection.loading) return;
   googleCalendarConnection.loading = true;
   try {
-    const [status] = await Promise.all([
-      callGoogleCalendarFunction("status"),
-      loadGoogleCalendarEvents(),
-    ]);
+    const status = await callGoogleCalendarFunction("status");
     googleCalendarConnection = {
       loaded: true,
       loading: false,
       connected: Boolean(status?.connected),
       connection: status?.connection || null,
     };
+
+    if (googleCalendarConnection.connected && sync) {
+      try {
+        await callGoogleCalendarFunction("sync");
+        googleCalendarLastAutoSyncAt = Date.now();
+      } catch (syncError) {
+        console.warn("Could not auto-sync Google Calendar", syncError);
+      }
+    }
+    await loadGoogleCalendarEvents();
   } catch (error) {
     console.warn("Could not load Google Calendar integration", error);
     googleCalendarConnection = { loaded: true, loading: false, connected: false, connection: null, error: error.message };
     if (!silent) showToast(error.message || "לא ניתן לטעון את יומן Google");
   }
+}
+
+async function autoSyncGoogleCalendar({ force = false, silent = true } = {}) {
+  if (!SUPABASE_ENABLED || !currentUser || !currentHouseholdId || !googleCalendarConnection.connected) return;
+  if (googleCalendarAutoSyncPromise) return googleCalendarAutoSyncPromise;
+  if (!force && Date.now() - googleCalendarLastAutoSyncAt < GOOGLE_CALENDAR_AUTO_SYNC_INTERVAL_MS) return;
+
+  googleCalendarAutoSyncPromise = (async () => {
+    try {
+      await callGoogleCalendarFunction("sync");
+      googleCalendarLastAutoSyncAt = Date.now();
+      await loadGoogleCalendarEvents();
+      if (currentScreen === "events" || currentScreen === "home") render();
+    } catch (error) {
+      console.warn("Could not refresh Google Calendar", error);
+      if (!silent) showToast(error.message || "לא ניתן לסנכרן את יומן Google");
+    } finally {
+      googleCalendarAutoSyncPromise = null;
+    }
+  })();
+  return googleCalendarAutoSyncPromise;
 }
 
 function handleGoogleCalendarReturn() {
@@ -2473,6 +2526,7 @@ async function syncGoogleCalendarNow() {
   render();
   try {
     const response = await callGoogleCalendarFunction("sync");
+    googleCalendarLastAutoSyncAt = Date.now();
     await loadGoogleCalendarEvents();
     showToast(`היומן סונכרן${Number.isFinite(response?.synced) ? ` · ${response.synced} אירועים` : ""}`);
   } catch (error) {
@@ -2505,7 +2559,8 @@ async function openGoogleCalendarPicker() {
       dialogSubmit.textContent = "מסנכרנת…";
       try {
         await callGoogleCalendarFunction("set-calendars", { calendar_ids: ids });
-        await loadGoogleCalendarIntegration({ silent: true });
+        await loadGoogleCalendarIntegration({ silent: true, sync: false });
+        googleCalendarLastAutoSyncAt = Date.now();
         dialog.close();
         showToast("היומנים נשמרו וסונכרנו");
         render();
@@ -3857,6 +3912,13 @@ window.addEventListener("hashchange", () => {
     ? requestedScreen
     : (availableNavItems()[0]?.id || "home");
   render();
+  if (currentScreen === "events") window.setTimeout(() => autoSyncGoogleCalendar({ force: true }), 0);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && (currentScreen === "events" || currentScreen === "home")) {
+    autoSyncGoogleCalendar({ force: true });
+  }
 });
 
 authForm?.addEventListener("submit", async (event) => {
