@@ -99,6 +99,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "🔄", text: "אירועים חדשים ב-Google Calendar מסתנכרנים אוטומטית בפתיחת האפליקציה ובעמוד האירועים." },
     ],
   },
+  {
+    version: "15.27",
+    updates: [
+      { icon: "✉️", text: "אפשר לבחור את בני המשפחה כמשתתפים ולשלוח להם זימון אמיתי דרך Google Calendar." },
+      { icon: "📅", text: "אירוע שנוצר באפליקציה יכול להישמר ביומן Google של המארגן ולהתעדכן בו גם לאחר עריכה או ביטול." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -928,6 +935,10 @@ function normalizeState(input) {
         event.participants = [...new Set(participantNames)];
       }
       event.participants = event.participants.filter((name) => HOUSEHOLD_MEMBERS.includes(name));
+      event.googleEventId = String(event.googleEventId || "").trim();
+      event.googleCalendarId = String(event.googleCalendarId || "").trim();
+      event.googleHtmlLink = String(event.googleHtmlLink || "").trim();
+      event.googleOwnerUserId = String(event.googleOwnerUserId || "").trim();
       event.allDay = Boolean(event.allDay);
       event.recurring = ["weekly", "monthly", "yearly"].includes(event.recurring) ? event.recurring : "none";
       const normalizedStartDate = /^\d{4}-\d{2}-\d{2}$/.test(String(event.date || "")) ? String(event.date) : "";
@@ -2318,7 +2329,7 @@ function filterShoppingRows() {
 }
 
 
-/* Google Calendar – read-only sync */
+/* Google Calendar – sync, event creation and invitations */
 function googleCalendarFunctionUrl() {
   return `${APP_CONFIG.supabaseUrl}/functions/v1/${GOOGLE_CALENDAR_FUNCTION_NAME}`;
 }
@@ -2483,6 +2494,76 @@ function handleGoogleCalendarReturn() {
   }
 }
 
+function googleCalendarWriteEnabled() {
+  return Boolean(
+    googleCalendarConnection.connected &&
+    googleCalendarConnection.connection?.can_create_events
+  );
+}
+
+function eventGooglePayload(event) {
+  return {
+    app_event_id: event.id,
+    title: event.title,
+    date: event.date,
+    end_date: event.endDate || event.date,
+    all_day: Boolean(event.allDay),
+    start_time: event.startTime || "",
+    end_time: event.endTime || "",
+    location: event.location || "",
+    notes: event.notes || "",
+    recurring: event.recurring || "none",
+    participant_names: Array.isArray(event.participants) ? event.participants : [],
+  };
+}
+
+async function createOrUpdateGoogleEvent(event) {
+  const linked = Boolean(event.googleEventId && event.googleOwnerUserId);
+  if (!linked && !googleCalendarWriteEnabled()) {
+    throw new Error("צריך לחבר מחדש את יומן Google ולאשר יצירת אירועים");
+  }
+  const response = await callGoogleCalendarFunction(linked ? "update-event" : "create-event", {
+    ...eventGooglePayload(event),
+    google_event_id: event.googleEventId || undefined,
+    google_calendar_id: event.googleCalendarId || "primary",
+    owner_user_id: event.googleOwnerUserId || undefined,
+  });
+  event.googleEventId = String(response?.event_id || event.googleEventId || "");
+  event.googleCalendarId = String(response?.calendar_id || event.googleCalendarId || "primary");
+  event.googleHtmlLink = String(response?.html_link || event.googleHtmlLink || "");
+  event.googleOwnerUserId = String(response?.owner_user_id || event.googleOwnerUserId || currentUser?.id || "");
+  googleCalendarLastAutoSyncAt = Date.now();
+  await loadGoogleCalendarEvents();
+  return response;
+}
+
+async function deleteGoogleEventForLocalEvent(event) {
+  if (!event?.googleEventId || !event?.googleOwnerUserId) return;
+  await callGoogleCalendarFunction("delete-event", {
+    google_event_id: event.googleEventId,
+    google_calendar_id: event.googleCalendarId || "primary",
+    owner_user_id: event.googleOwnerUserId,
+  });
+  event.googleEventId = "";
+  event.googleCalendarId = "";
+  event.googleHtmlLink = "";
+  event.googleOwnerUserId = "";
+  googleCalendarLastAutoSyncAt = Date.now();
+  await loadGoogleCalendarEvents();
+}
+
+async function cancelGoogleEventOccurrence(event, occurrenceStartDate) {
+  if (!event?.googleEventId || !event?.googleOwnerUserId) return;
+  await callGoogleCalendarFunction("delete-occurrence", {
+    google_event_id: event.googleEventId,
+    google_calendar_id: event.googleCalendarId || "primary",
+    owner_user_id: event.googleOwnerUserId,
+    occurrence_date: occurrenceStartDate,
+  });
+  googleCalendarLastAutoSyncAt = Date.now();
+  await loadGoogleCalendarEvents();
+}
+
 function googleCalendarPanelHtml() {
   if (!SUPABASE_ENABLED) return "";
   if (!googleCalendarConnection.loaded || googleCalendarConnection.loading) {
@@ -2490,14 +2571,16 @@ function googleCalendarPanelHtml() {
   }
   if (!googleCalendarConnection.connected) {
     return `<section class="card google-calendar-card">
-      <div class="google-calendar-main"><span class="google-calendar-icon" aria-hidden="true">📆</span><div><h3>יומן Google</h3><p>אפשר להציג כאן אירועים שכבר קיימים ביומן שלך. החיבור הוא לקריאה בלבד.</p></div></div>
+      <div class="google-calendar-main"><span class="google-calendar-icon" aria-hidden="true">📆</span><div><h3>יומן Google</h3><p>אפשר להציג אירועים מהיומן וגם ליצור אירועים באפליקציה ולשלוח זימונים לבני המשפחה.</p></div></div>
       <button type="button" class="primary-button compact-button" data-google-calendar-connect ${googleCalendarActionInProgress ? "disabled" : ""}>חיבור ליומן Google</button>
     </section>`;
   }
   const email = googleCalendarConnection.connection?.google_account_email || "חשבון Google מחובר";
-  return `<section class="card google-calendar-card connected">
-    <div class="google-calendar-main"><span class="google-calendar-icon" aria-hidden="true">✅</span><div><h3>יומן Google מחובר</h3><p>${escapeHtml(email)} · האירועים מוצגים לקריאה בלבד לכל בני המשפחה.</p></div></div>
+  const canCreateEvents = googleCalendarWriteEnabled();
+  return `<section class="card google-calendar-card connected ${canCreateEvents ? "" : "permission-needed"}">
+    <div class="google-calendar-main"><span class="google-calendar-icon" aria-hidden="true">${canCreateEvents ? "✅" : "🔐"}</span><div><h3>יומן Google מחובר</h3><p>${escapeHtml(email)} · ${canCreateEvents ? "אפשר להציג אירועים, ליצור אירועים ולשלוח זימונים." : "האירועים מוצגים, אך צריך אישור נוסף כדי ליצור אירועים ולשלוח זימונים."}</p></div></div>
     <div class="google-calendar-actions">
+      ${canCreateEvents ? "" : `<button type="button" class="primary-button compact-button" data-google-calendar-connect ${googleCalendarActionInProgress ? "disabled" : ""}>אישור יצירת אירועים</button>`}
       <button type="button" class="secondary-button compact-button" data-google-calendar-sync ${googleCalendarActionInProgress ? "disabled" : ""}>סנכרון עכשיו</button>
       <button type="button" class="secondary-button compact-button" data-google-calendar-calendars ${googleCalendarActionInProgress ? "disabled" : ""}>בחירת יומנים</button>
       <button type="button" class="text-button danger-text-button" data-google-calendar-disconnect ${googleCalendarActionInProgress ? "disabled" : ""}>ניתוק</button>
@@ -2588,8 +2671,16 @@ async function disconnectGoogleCalendar() {
   try {
     await callGoogleCalendarFunction("disconnect");
     googleCalendarEvents = [];
+    (state?.events || []).forEach((event) => {
+      if (event.googleOwnerUserId !== currentUser?.id) return;
+      event.googleEventId = "";
+      event.googleCalendarId = "";
+      event.googleHtmlLink = "";
+      event.googleOwnerUserId = "";
+    });
+    if (state) saveState("");
     googleCalendarConnection = { loaded: true, loading: false, connected: false, connection: null };
-    showToast("יומן Google נותק");
+    showToast("יומן Google נותק. האירועים נשארו באפליקציה ללא קישור ליומן.");
   } catch (error) {
     showToast(error.message || "לא ניתן לנתק את היומן");
   } finally {
@@ -2599,7 +2690,14 @@ async function disconnectGoogleCalendar() {
 }
 
 function allEventSources() {
-  return [...(state?.events || []), ...googleCalendarEvents];
+  const localEvents = state?.events || [];
+  const linkedGoogleEvents = new Set(localEvents
+    .filter((event) => event.googleEventId)
+    .map((event) => `${event.googleOwnerUserId || ""}|${event.googleEventId}`));
+  const importedEvents = googleCalendarEvents.filter((event) =>
+    !linkedGoogleEvents.has(`${event.connectionUserId || ""}|${event.googleEventId || ""}`)
+  );
+  return [...localEvents, ...importedEvents];
 }
 
 /* Events */
@@ -2692,10 +2790,11 @@ function eventFullHtml(event) {
   const sourceId = event.sourceEventId || event.id;
   const isMultiDay = String(event.endDate || event.date) !== String(event.date || "");
   const rangeLabel = isMultiDay ? `<div class="event-date-range-label">${escapeHtml(formatEventDateRange(event.date, event.endDate))}</div>` : "";
-  const googleMark = event.isGoogleEvent ? ` <span class="google-event-mark" title="אירוע מיומן Google">Google</span>` : "";
+  const linkedToGoogle = Boolean(event.isGoogleEvent || event.googleEventId);
+  const googleMark = linkedToGoogle ? ` <span class="google-event-mark" title="אירוע שמחובר ל-Google Calendar">Google</span>` : "";
   const actions = event.isGoogleEvent
     ? (event.htmlLink ? moreMenuHtml(`<button type="button" data-open-google-event="${sourceId}">פתיחה ב-Google Calendar</button>`) : "")
-    : moreMenuHtml(`<button type="button" data-edit-event="${sourceId}">עריכה</button><button type="button" data-download-ics="${sourceId}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}">ביטול אירוע</button>`);
+    : moreMenuHtml(`${event.googleHtmlLink ? `<button type="button" data-open-linked-google-event="${sourceId}">פתיחה ב-Google Calendar</button>` : ""}<button type="button" data-edit-event="${sourceId}">עריכה</button><button type="button" data-download-ics="${sourceId}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}">ביטול אירוע</button>`);
   return `<div class="compact-event-row event-summary-row ${event.isGoogleEvent ? "google-event-row" : ""}" data-view-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}" role="button" tabindex="0" aria-label="פתיחת פרטי האירוע ${escapeHtml(event.title)}">
     <div class="compact-event-date"><strong>${date.getDate()}</strong><span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(date)}</span></div>
     <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}${googleMark}${event.recurring && event.recurring !== "none" ? ` <span class="recurring-event-mark" title="אירוע חוזר">↻</span>` : ""}</div>${rangeLabel}</div>
@@ -2715,6 +2814,7 @@ function openEventDetails(id, occurrenceDate = "") {
     ? "כל היום"
     : [event.startTime || "", event.endTime || ""].filter(Boolean).join("–") || "לא הוגדרה שעה";
   const recurrenceLabels = { none: "ללא חזרה", weekly: "שבועי", monthly: "חודשי", yearly: "שנתי" };
+  const participants = Array.isArray(event.participants) ? event.participants : [];
 
   dialogEyebrow.textContent = "פרטי אירוע";
   dialogTitle.textContent = event.title;
@@ -2724,9 +2824,11 @@ function openEventDetails(id, occurrenceDate = "") {
     <div class="event-detail-row"><span>${occurrenceStartDate === occurrenceEndDate ? "תאריך" : "תאריכים"}</span><strong>${escapeHtml(dateLabel)}</strong></div>
     <div class="event-detail-row"><span>שעה</span><strong>${escapeHtml(timeLabel)}</strong></div>
     ${event.location ? `<div class="event-detail-row"><span>מקום</span><strong>${escapeHtml(event.location)}</strong></div>` : ""}
+    ${participants.length ? `<div class="event-detail-row"><span>משתתפים</span><strong>${participants.map(escapeHtml).join(" · ")}</strong></div>` : ""}
     ${event.notes ? `<div class="event-detail-notes"><span>הערות</span><p>${escapeHtml(event.notes)}</p></div>` : ""}
     ${event.recurring && event.recurring !== "none" ? `<div class="event-detail-row"><span>חזרתיות</span><strong>${escapeHtml(recurrenceLabels[event.recurring] || event.recurring)}</strong></div>` : ""}
     ${event.isGoogleEvent ? `<div class="event-detail-row"><span>מקור</span><strong>Google Calendar · לקריאה בלבד</strong></div>${event.htmlLink ? `<a class="primary-button google-open-link" href="${escapeHtml(event.htmlLink)}" target="_blank" rel="noopener">פתיחה ב-Google Calendar</a>` : ""}` : ""}
+    ${event.googleEventId ? `<div class="event-detail-row"><span>זימון</span><strong>נשמר ב-Google Calendar ונשלח למשתתפים</strong></div>${event.googleHtmlLink ? `<a class="primary-button google-open-link" href="${escapeHtml(event.googleHtmlLink)}" target="_blank" rel="noopener">פתיחה ב-Google Calendar</a>` : ""}` : ""}
   </div>`;
   if (dialog.open) dialog.close();
   dialog.showModal();
@@ -3121,6 +3223,11 @@ function attachScreenEvents() {
     const calendarEvent = googleCalendarEvents.find((item) => item.id === button.dataset.openGoogleEvent);
     if (calendarEvent?.htmlLink) window.open(calendarEvent.htmlLink, "_blank", "noopener");
   }));
+  document.querySelectorAll("[data-open-linked-google-event]").forEach((button) => button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const calendarEvent = state.events.find((item) => item.id === button.dataset.openLinkedGoogleEvent);
+    if (calendarEvent?.googleHtmlLink) window.open(calendarEvent.googleHtmlLink, "_blank", "noopener");
+  }));
 
   document.querySelectorAll("[data-view-event]").forEach((row) => {
     row.addEventListener("click", (event) => {
@@ -3418,20 +3525,32 @@ function updateArchiveActionButtons() {
   if (deleteButton) deleteButton.disabled = !hasSelection;
 }
 
-function removeEventSeries(eventId) {
+async function removeEventSeries(eventId) {
   const event = state.events.find((existing) => existing.id === eventId);
   if (!event) return;
+  try {
+    if (event.googleEventId) await deleteGoogleEventForLocalEvent(event);
+  } catch (error) {
+    showToast(error.message || "לא ניתן לבטל את האירוע ב-Google Calendar");
+    return;
+  }
   state.events = state.events.filter((existing) => existing.id !== eventId);
   saveState(event.recurring && event.recurring !== "none" ? "סדרת האירועים בוטלה" : "האירוע בוטל");
   if (dialog.open) dialog.close();
   render();
 }
 
-function cancelSingleEventOccurrence(eventId, occurrenceDate) {
+async function cancelSingleEventOccurrence(eventId, occurrenceDate) {
   const event = state.events.find((existing) => existing.id === eventId);
   if (!event || !eventOccursOnDate(event, occurrenceDate)) return;
   const occurrenceStartDate = eventOccurrenceStartKeyForDate(event, occurrenceDate);
   if (!occurrenceStartDate) return;
+  try {
+    if (event.googleEventId) await cancelGoogleEventOccurrence(event, occurrenceStartDate);
+  } catch (error) {
+    showToast(error.message || "לא ניתן לבטל את המועד ב-Google Calendar");
+    return;
+  }
   event.excludedDates = [...new Set([...(event.excludedDates || []), occurrenceStartDate])].sort();
   saveState("המועד הזה בוטל ושאר הסדרה נשמרה");
   if (dialog.open) dialog.close();
@@ -3446,7 +3565,7 @@ function openEventCancellationDialog(eventId, occurrenceDate = "") {
 
   if (!recurring) {
     if (!confirm(`לבטל את האירוע „${event.title}”?`)) return;
-    removeEventSeries(eventId);
+    void removeEventSeries(eventId);
     return;
   }
 
@@ -3467,10 +3586,10 @@ function openEventCancellationDialog(eventId, occurrenceDate = "") {
     </div>
     <p class="muted small">ביטול מועד אחד לא ישפיע על שאר המועדים בסדרה.</p>
   </section>`;
-  dialogBody.querySelector("[data-cancel-one-occurrence]")?.addEventListener("click", () => cancelSingleEventOccurrence(eventId, selectedDate));
+  dialogBody.querySelector("[data-cancel-one-occurrence]")?.addEventListener("click", () => { void cancelSingleEventOccurrence(eventId, selectedDate); });
   dialogBody.querySelector("[data-cancel-entire-series]")?.addEventListener("click", () => {
     if (!confirm(`לבטל את כל סדרת האירועים „${event.title}”?`)) return;
-    removeEventSeries(eventId);
+    void removeEventSeries(eventId);
   });
   dialog.showModal();
 }
@@ -3516,9 +3635,9 @@ function showConfiguredDialog(config) {
   dialogEyebrow.textContent = config.eyebrow;
   dialogTitle.textContent = config.title;
   dialogBody.innerHTML = config.html;
-  dialogForm.onsubmit = (event) => {
+  dialogForm.onsubmit = async (event) => {
     event.preventDefault();
-    config.submit(new FormData(dialogForm));
+    await config.submit(new FormData(dialogForm));
   };
   if (dialog.open) dialog.close();
   dialog.showModal();
@@ -3639,10 +3758,26 @@ function submitShoppingEdit(id, formData) {
   render();
 }
 
+function eventParticipantOptionsHtml(item = null) {
+  const selected = new Set(Array.isArray(item?.participants)
+    ? item.participants
+    : [currentMemberName].filter((name) => HOUSEHOLD_MEMBERS.includes(name)));
+  return HOUSEHOLD_MEMBERS.map((name) => `<label class="member-choice"><input name="participants" type="checkbox" value="${escapeHtml(name)}" ${selected.has(name) ? "checked" : ""} /><span>${escapeHtml(name)}</span></label>`).join("");
+}
+
 function eventFormHtml(item = null) {
   const allDay = Boolean(item?.allDay);
   const storedEndDate = String(item?.endDate || item?.date || "");
   const multiDay = Boolean(item?.date && storedEndDate && storedEndDate !== item.date);
+  const googleLinked = Boolean(item?.googleEventId);
+  const googleWritable = googleCalendarWriteEnabled() || googleLinked;
+  const googleChoice = googleWritable
+    ? `<label class="notification-choice google-invite-choice">
+        <span class="notification-choice-icon" aria-hidden="true">📅</span>
+        <span class="notification-choice-copy"><strong>שמירה ביומן Google ושליחת זימונים</strong><small>האירוע יישמר ביומן של מי שיוצר אותו. שאר המשתתפים יקבלו זימון למייל המשויך לחשבון שלהם באפליקציה.</small></span>
+        <input name="syncGoogle" type="checkbox" ${googleLinked || !item ? "checked" : ""} />
+      </label>`
+    : `<div class="google-invite-unavailable"><strong>כדי לשלוח זימונים דרך Google</strong><span>${googleCalendarConnection.connected ? "חזרי לעמוד האירועים ולחצי על „אישור יצירת אירועים”." : "חברי קודם את יומן Google בעמוד האירועים."}</span></div>`;
   return `<div class="form-stack">
     <label>שם האירוע<input name="title" required autofocus value="${escapeHtml(item?.title || "")}" /></label>
     <div class="form-grid"><label>תאריך התחלה<input name="date" type="date" required data-event-start-date value="${escapeHtml(item?.date || "")}" /></label><label>מיקום<input name="location" value="${escapeHtml(item?.location || "")}" /></label></div>
@@ -3652,21 +3787,30 @@ function eventFormHtml(item = null) {
     <div class="form-grid" id="event-time-fields" ${allDay ? "hidden" : ""}><label>שעת התחלה<input name="startTime" type="time" value="${escapeHtml(item?.startTime || "")}" /></label><label>שעת סיום<input name="endTime" type="time" value="${escapeHtml(item?.endTime || "")}" /></label></div>
     <label>הערות<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
     <label>חזרתיות<select name="recurring"><option value="none" ${item?.recurring === "none" ? "selected" : ""}>ללא חזרה</option><option value="weekly" ${item?.recurring === "weekly" ? "selected" : ""}>שבועי</option><option value="monthly" ${item?.recurring === "monthly" ? "selected" : ""}>חודשי</option><option value="yearly" ${item?.recurring === "yearly" ? "selected" : ""}>שנתי</option></select></label>
+    <fieldset class="event-participants-fieldset"><legend>משתתפים</legend><div class="member-choice-grid">${eventParticipantOptionsHtml(item)}</div><small>סימון משתתף יוסיף אותו לאירוע. כאשר השמירה ב-Google פעילה, הוא יקבל גם זימון במייל.</small></fieldset>
+    ${googleChoice}
     ${notificationChoiceHtml({ checked: !item, text: item ? "שליחת התראה על העדכון" : "שליחת התראה על האירוע החדש" })}
   </div>`;
 }
 
-function submitEvent(formData, id = null) {
+async function submitEvent(formData, id = null) {
   const allDay = formData.get("allDay") === "on";
   const date = String(formData.get("date") || "");
   const multiDay = formData.get("multiDay") === "on";
   const endDate = multiDay ? String(formData.get("endDate") || "") : date;
   if (!date || !endDate) return showToast("יש לבחור תאריך לאירוע");
   if (endDate < date) return showToast("תאריך הסיום חייב להיות אחרי תאריך ההתחלה");
+  const participants = [...formData.getAll("participants")]
+    .map((name) => String(name || ""))
+    .filter((name) => HOUSEHOLD_MEMBERS.includes(name));
   const values = {
     title: String(formData.get("title") || "").trim(), date, endDate, allDay,
-    startTime: allDay ? "" : formData.get("startTime"), endTime: allDay ? "" : formData.get("endTime"),
-    location: String(formData.get("location") || "").trim(), notes: String(formData.get("notes") || "").trim(), recurring: formData.get("recurring"),
+    startTime: allDay ? "" : String(formData.get("startTime") || ""),
+    endTime: allDay ? "" : String(formData.get("endTime") || ""),
+    location: String(formData.get("location") || "").trim(),
+    notes: String(formData.get("notes") || "").trim(),
+    recurring: formData.get("recurring"),
+    participants,
   };
   let savedEvent;
   if (id) {
@@ -3675,13 +3819,50 @@ function submitEvent(formData, id = null) {
     Object.assign(savedEvent, values);
     savedEvent.excludedDates = Array.isArray(savedEvent.excludedDates) ? savedEvent.excludedDates : [];
   } else {
-    savedEvent = { id: crypto.randomUUID(), ...values, excludedDates: [] };
+    savedEvent = {
+      id: crypto.randomUUID(),
+      ...values,
+      excludedDates: [],
+      googleEventId: "",
+      googleCalendarId: "",
+      googleHtmlLink: "",
+      googleOwnerUserId: "",
+    };
     state.events.push(savedEvent);
   }
+
+  const shouldSyncGoogle = formData.get("syncGoogle") === "on" || Boolean(savedEvent.googleEventId);
   const shouldNotify = formData.get("sendNotification") === "on";
-  saveState(id ? "האירוע עודכן" : "האירוע נוסף");
+  const originalSubmitText = dialogSubmit.textContent;
+  let googleMessage = "";
+  let googleError = "";
+  let googleResponse = null;
+
+  dialogSubmit.disabled = true;
+  dialogSubmit.textContent = shouldSyncGoogle ? "שומרת ושולחת זימונים…" : "שומרת…";
+  try {
+    if (shouldSyncGoogle) {
+      googleResponse = await createOrUpdateGoogleEvent(savedEvent);
+      googleMessage = " ונשמר גם ב-Google";
+      if (Array.isArray(googleResponse?.missing_participants) && googleResponse.missing_participants.length) {
+        googleMessage += ` · לא נמצא אימייל עבור ${googleResponse.missing_participants.join(", ")}`;
+      }
+    }
+  } catch (error) {
+    console.error("Could not save event in Google Calendar", error);
+    googleError = error instanceof Error ? error.message : "לא ניתן לעדכן את Google Calendar";
+  } finally {
+    dialogSubmit.disabled = false;
+    dialogSubmit.textContent = originalSubmitText;
+  }
+
+  saveState("");
   dialog.close();
   render();
+  showToast(googleError
+    ? `${id ? "האירוע עודכן" : "האירוע נוסף"} באפליקציה, אך Google לא עודכן: ${googleError}`
+    : `${id ? "האירוע עודכן" : "האירוע נוסף"}${googleMessage}`);
+
   if (shouldNotify) {
     const recurrence = { weekly: " · חוזר מדי שבוע", monthly: " · חוזר מדי חודש", yearly: " · חוזר מדי שנה" }[values.recurring] || "";
     const time = values.allDay ? " · כל היום" : (values.startTime ? ` · ${values.startTime}` : "");
@@ -3691,7 +3872,7 @@ function submitEvent(formData, id = null) {
       body: `${values.title} · ${formatEventDateRange(values.date, values.endDate)}${time}${recurrence}`,
       targetPage: "events",
       entityId: savedEvent.id,
-      metadata: { recurring: values.recurring, date: values.date, endDate: values.endDate },
+      metadata: { recurring: values.recurring, date: values.date, endDate: values.endDate, participants },
     }, { showNoRecipients: true });
   }
 }
