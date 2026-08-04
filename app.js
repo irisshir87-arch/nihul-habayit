@@ -195,6 +195,12 @@ const APP_RELEASES = Object.freeze([
       { icon: "📅", text: "בתצוגה השבועית כל שבעת ימי השבוע מוצגים בשורה אחת, ללא גלילה לצד." },
     ],
   },
+  {
+    version: "15.43",
+    updates: [
+      { icon: "📅", text: "התצוגה השבועית נכנסת במלואה לרוחב המסך, עם שמות ימים קצרים וללא גלילה לצד." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -2929,8 +2935,9 @@ function homeWeekCalendarCellHtml(day) {
   const key = dateKey(day);
   const today = key === dateKey(new Date());
   const dayEvents = calendarEntriesForDate(key);
-  const dayName = new Intl.DateTimeFormat("he-IL", { weekday: "long" }).format(day);
-  const dateLabel = new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short" }).format(day);
+  const shortWeekdayNames = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
+  const dayName = shortWeekdayNames[day.getDay()] || "";
+  const dateLabel = String(day.getDate());
   const eventRows = dayEvents.map((event) => {
     const participantClass = calendarParticipantClass(event);
     const timeLabel = event.allDay ? "כל היום" : (event.startTime || "");

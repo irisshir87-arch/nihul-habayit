@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-42-week-single-row";
+const CACHE = "nihul-habayit-v15-43-week-no-horizontal-scroll";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {
