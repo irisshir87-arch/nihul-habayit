@@ -2189,27 +2189,113 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
 }
 
 
-/* v15.28: keep event action menus above adjacent month cards */
+/* v15.29: action menus stay above cards on every page */
 .events-month-group,
 .events-month-group .events-card,
-.events-month-group .compact-event-list {
+.events-month-group .compact-event-list,
+.shopping-category-group,
+.shopping-compact-list,
+.task-assignee-card,
+.task-simple-list,
+.wish-group-card,
+.wish-list,
+.trip-category-section,
+.trip-list {
   overflow: visible;
 }
 
-.compact-event-row {
+.shopping-row,
+.task-compact-row,
+.wish-row,
+.trip-row,
+.compact-event-row,
+.shopping-category-group,
+.task-assignee-card,
+.wish-group-card,
+.trip-category-section,
+.events-card {
   position: relative;
 }
 
-.compact-event-row .more-menu[open] {
-  z-index: 250;
-}
-
-.compact-event-row .more-menu[open] .more-menu-popover {
-  z-index: 260;
-}
-
-/* Open upward near the bottom of a month card so the menu stays fully visible. */
-.compact-event-list > .compact-event-row:nth-last-child(-n + 2) .more-menu-popover {
+.more-menu { z-index: 20; }
+.more-menu[open] { z-index: 1200; }
+.more-menu[open] .more-menu-popover { z-index: 1210; }
+.more-menu.open-up .more-menu-popover {
   top: auto;
   bottom: calc(100% + 6px);
+}
+.menu-open-container { z-index: 1100 !important; }
+
+/* Keep the colored headers rounded even though their cards no longer clip menus. */
+.task-assignee-header,
+.wish-group-header { border-radius: 13px 13px 0 0; }
+.trip-category-header,
+.shopping-category-header { border-radius: 10px 10px 0 0; }
+
+/* Saved multi-line descriptions */
+.saved-description-paragraph {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+.saved-description-list {
+  margin: 5px 0 0;
+  padding-inline-start: 20px;
+  display: grid;
+  gap: 4px;
+  line-height: 1.55;
+}
+.task-description .saved-description-list,
+.wish-note .saved-description-list { color: inherit; }
+.wish-note { margin-top: 6px; }
+
+/* Planning categories can be reordered by dragging their headers. */
+.category-filter-toolbar {
+  max-width: none;
+  align-items: center;
+}
+.category-drag-hint {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+.wish-group-title {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wish-category-drag-handle {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(66, 92, 150, .22);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .72);
+  color: #526da9;
+  font-weight: 900;
+  letter-spacing: -2px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.wish-category-drag-handle:active { cursor: grabbing; }
+.wish-category-card.dragging {
+  z-index: 900;
+  opacity: .76;
+  transform: scale(1.01);
+  box-shadow: 0 14px 34px rgba(23, 32, 51, .18);
+}
+body.wish-category-dragging {
+  user-select: none;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 760px) {
+  .category-filter-toolbar { align-items: stretch; }
+  .category-drag-hint { line-height: 1.4; }
+  .wish-category-drag-handle { width: 30px; height: 30px; flex-basis: 30px; }
 }

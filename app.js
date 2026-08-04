@@ -112,6 +112,15 @@ const APP_RELEASES = Object.freeze([
       { icon: "⋮", text: "תפריט העריכה והמחיקה באירועים נשאר גלוי גם כשהאירוע קרוב לכרטיס של החודש הבא." },
     ],
   },
+  {
+    version: "15.29",
+    updates: [
+      { icon: "⋮", text: "תפריטי העריכה והמחיקה נשארים גלויים בכל עמודי האפליקציה." },
+      { icon: "☷", text: "תיאורים שנכתבו בכמה שורות מוצגים כרשימה מסודרת בסידורים ובתכנונים." },
+      { icon: "↕", text: "אפשר לשנות את סדר קטגוריות התכנונים בגרירה." },
+      { icon: "א", text: "סידורים מסודרים כברירת מחדל לפי שם הנושא, ועדיין אפשר לקבוע סדר ידני בגרירה." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -194,6 +203,7 @@ const defaultState = {
     { id: crypto.randomUUID(), title: "ערב זוגי", date: "2026-07-29", allDay: false, startTime: "20:30", endTime: "23:00", location: "תל אביב", notes: "", participants: ["איריס", "תומר"], recurring: "none" },
   ],
   taskCategories: [...TASK_CATEGORIES],
+  taskOrderMode: "title",
   tasks: [
     { id: crypto.randomUUID(), title: "להזמין טכנאי למזגן", assignee: "תומר", category: "בית", notes: "המזגן בחדר הילדים", completed: false, completedAt: null, order: 0 },
     { id: crypto.randomUUID(), title: "להחזיר ספרים לספרייה", assignee: "איריס", category: "ילדים", notes: "", completed: false, completedAt: null, order: 1 },
@@ -227,6 +237,7 @@ let calendarViewDate = new Date(new Date().getFullYear(), new Date().getMonth(),
 let expandedTaskIds = new Set();
 let archivedTripSelection = new Set();
 let taskDragState = null;
+let wishCategoryDragState = null;
 let suppressTaskClickUntil = 0;
 let supabaseClient = null;
 let currentUser = null;
@@ -823,6 +834,7 @@ function createEmptyHouseholdState() {
     memberEmails: { iris: "", tomer: "" },
     events: [],
     taskCategories: [...TASK_CATEGORIES],
+    taskOrderMode: "title",
     tasks: [],
     wishCategories: [...WISH_DEFAULT_CATEGORIES],
     wishes: [],
@@ -857,6 +869,14 @@ function normalizeCategoryList(defaults, stored, itemCategories) {
   return [...new Set([
     ...defaults,
     ...(Array.isArray(stored) ? stored : []),
+    ...itemCategories,
+  ].map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function normalizeOrderedCategoryList(defaults, stored, itemCategories) {
+  return [...new Set([
+    ...(Array.isArray(stored) ? stored : []),
+    ...defaults,
     ...itemCategories,
   ].map((value) => String(value || "").trim()).filter(Boolean))];
 }
@@ -982,6 +1002,7 @@ function normalizeState(input) {
       delete task.name;
     });
     loaded.tasks.sort((a, b) => a.order - b.order).forEach((task, index) => { task.order = index; });
+    loaded.taskOrderMode = loaded.taskOrderMode === "manual" ? "manual" : "title";
     loaded.taskCategories = normalizeCategoryList(
       TASK_CATEGORIES,
       loaded.taskCategories,
@@ -1005,7 +1026,7 @@ function normalizeState(input) {
       delete wish.priority;
       delete wish.status;
     });
-    loaded.wishCategories = normalizeCategoryList(
+    loaded.wishCategories = normalizeOrderedCategoryList(
       WISH_DEFAULT_CATEGORIES,
       loaded.wishCategories,
       loaded.wishes.map((wish) => wish.category)
@@ -1317,6 +1338,8 @@ function showLogin(message = "") {
   googleCalendarActionInProgress = false;
   googleCalendarLastAutoSyncAt = 0;
   googleCalendarAutoSyncPromise = null;
+  taskDragState = null;
+  wishCategoryDragState = null;
   clearTimeout(shoppingPushTimer);
   shoppingPushTimer = null;
   configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
@@ -1475,6 +1498,19 @@ function escapeHtml(value = "") {
     .replaceAll("'", "&#039;");
 }
 
+function savedDescriptionHtml(value = "") {
+  const lines = String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) return "";
+  if (lines.length === 1) return `<p class="saved-description-paragraph">${escapeHtml(lines[0])}</p>`;
+  return `<ul class="saved-description-list">${lines.map((line) => {
+    const cleanLine = line.replace(/^(?:[-*•]\s+|\d+[.)]\s+)/, "").trim() || line;
+    return `<li>${escapeHtml(cleanLine)}</li>`;
+  }).join("")}</ul>`;
+}
+
 function normalizeName(value = "") {
   return String(value).trim().replace(/\s+/g, " ").toLocaleLowerCase("he");
 }
@@ -1508,6 +1544,40 @@ function priorityBadge(priority) {
 
 function moreMenuHtml(actions) {
   return `<details class="more-menu"><summary aria-label="פעולות נוספות">⋯</summary><div class="more-menu-popover">${actions}</div></details>`;
+}
+
+function setupMoreMenus() {
+  const menus = [...document.querySelectorAll(".more-menu")];
+  const containerSelector = ".shopping-row, .task-compact-row, .wish-row, .trip-row, .compact-event-row, .shopping-category-group, .task-assignee-card, .wish-group-card, .trip-category-section, .events-card";
+
+  menus.forEach((menu) => {
+    menu.addEventListener("toggle", () => {
+      const container = menu.closest(containerSelector);
+      if (!menu.open) {
+        menu.classList.remove("open-up");
+        container?.classList.remove("menu-open-container");
+        return;
+      }
+
+      menus.forEach((otherMenu) => {
+        if (otherMenu !== menu && otherMenu.open) otherMenu.open = false;
+      });
+      menu.classList.remove("open-up");
+      container?.classList.add("menu-open-container");
+
+      window.requestAnimationFrame(() => {
+        const popover = menu.querySelector(".more-menu-popover");
+        if (!popover || !menu.open) return;
+        const menuRect = menu.getBoundingClientRect();
+        const popoverRect = popover.getBoundingClientRect();
+        const roomBelow = window.innerHeight - menuRect.bottom;
+        const roomAbove = menuRect.top;
+        if (popoverRect.bottom > window.innerHeight - 12 && roomAbove > roomBelow) {
+          menu.classList.add("open-up");
+        }
+      });
+    });
+  });
 }
 
 function availableNavItems() {
@@ -2876,7 +2946,12 @@ function taskAssigneeGroupHtml(assignee, tasks, completed) {
 }
 
 function sortTasks(a, b) {
-  return Number(a.order || 0) - Number(b.order || 0) || collator.compare(a.title, b.title);
+  if (state.taskOrderMode === "manual") {
+    return Number(a.order || 0) - Number(b.order || 0) || collator.compare(a.title, b.title);
+  }
+  return collator.compare(a.title, b.title)
+    || collator.compare(a.category || "", b.category || "")
+    || Number(a.order || 0) - Number(b.order || 0);
 }
 
 function taskCompactHtml(task, completed) {
@@ -2888,7 +2963,7 @@ function taskCompactHtml(task, completed) {
     </button>
     <button type="button" class="task-drag-handle" data-task-drag-handle="${task.id}" aria-label="גרירת הסידור לשינוי סדר" title="גרירה לשינוי סדר">⋮⋮</button>
     ${moreMenuHtml(`<button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button>`)}
-    ${task.notes ? `<div class="task-description" ${expanded ? "" : "hidden"}>${escapeHtml(task.notes)}</div>` : ""}
+    ${task.notes ? `<div class="task-description" ${expanded ? "" : "hidden"}>${savedDescriptionHtml(task.notes)}</div>` : ""}
   </article>`;
 }
 
@@ -2916,7 +2991,7 @@ function addTaskCategory() {
 
 /* Wishes */
 function wishCategories() {
-  return normalizeCategoryList(WISH_DEFAULT_CATEGORIES, state.wishCategories, state.wishes.map((wish) => wish.category));
+  return normalizeOrderedCategoryList(WISH_DEFAULT_CATEGORIES, state.wishCategories, state.wishes.map((wish) => wish.category));
 }
 
 function wishCategoryOptions(selected = "") {
@@ -2928,11 +3003,13 @@ function renderWishes() {
   const populatedCategories = categories.filter((category) => state.wishes.some((wish) => wish.category === category));
   if (wishCategoryFilter !== "הכל" && !populatedCategories.includes(wishCategoryFilter)) wishCategoryFilter = "הכל";
   const visibleCategories = wishCategoryFilter === "הכל" ? populatedCategories : [wishCategoryFilter];
+  const canReorderCategories = wishCategoryFilter === "הכל" && visibleCategories.length > 1;
   return `<section class="planning-page">
     ${populatedCategories.length ? `<div class="category-toolbar category-filter-toolbar">
       <label class="category-filter-label">סינון<select data-wish-filter><option value="הכל">הכל</option>${populatedCategories.map((category) => `<option value="${escapeHtml(category)}" ${wishCategoryFilter === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
+      ${canReorderCategories ? `<span class="category-drag-hint">גררי את הידית בכותרת כדי לשנות את סדר הקטגוריות</span>` : ""}
     </div>` : ""}
-    <div class="wish-group-grid">${visibleCategories.map(wishGroupHtml).join("") || emptyHtml("עדיין לא נוספו תכנונים")}</div>
+    <div class="wish-group-grid" data-wish-category-list>${visibleCategories.map((category) => wishGroupHtml(category, canReorderCategories)).join("") || emptyHtml("עדיין לא נוספו תכנונים")}</div>
     <div class="category-toolbar category-management-toolbar planning-management-toolbar">
       <button type="button" class="secondary-button compact-button" data-add-wish-category>＋ הוספת קטגוריה</button>
       <label class="category-manager-label">ניהול קטגוריה<select data-wish-category-manager>${categories.map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`).join("")}</select></label>
@@ -2942,15 +3019,21 @@ function renderWishes() {
   </section>`;
 }
 
-function wishGroupHtml(category) {
+function wishGroupHtml(category, draggable = false) {
   const wishes = state.wishes.filter((wish) => wish.category === category).sort((a, b) => collator.compare(a.title, b.title));
-  return `<section class="card wish-group-card"><div class="wish-group-header"><h3>${escapeHtml(category)}</h3><span class="muted small">${wishes.length} תכנונים</span></div><div class="wish-list">${wishes.map(wishHtml).join("") || emptyHtml("אין תכנונים בקטגוריה")}</div></section>`;
+  return `<section class="card wish-group-card wish-category-card" data-wish-category-card="${escapeHtml(category)}" ${draggable ? 'draggable="true"' : ""}>
+    <div class="wish-group-header">
+      <div class="wish-group-title">${draggable ? `<button type="button" class="wish-category-drag-handle" data-wish-category-drag-handle aria-label="גרירת קטגוריית ${escapeHtml(category)} לשינוי סדר" title="גרירה לשינוי סדר">⋮⋮</button>` : ""}<h3>${escapeHtml(category)}</h3></div>
+      <span class="muted small">${wishes.length} תכנונים</span>
+    </div>
+    <div class="wish-list">${wishes.map(wishHtml).join("") || emptyHtml("אין תכנונים בקטגוריה")}</div>
+  </section>`;
 }
 
 function wishHtml(wish) {
   const references = Array.isArray(wish.references) ? wish.references : [];
   return `<article class="wish-row">
-    <div class="wish-main"><strong>${escapeHtml(wish.title)}</strong>${wish.note ? `<div class="list-meta">${escapeHtml(wish.note)}</div>` : ""}
+    <div class="wish-main"><strong>${escapeHtml(wish.title)}</strong>${wish.note ? `<div class="list-meta wish-note">${savedDescriptionHtml(wish.note)}</div>` : ""}
       ${references.length ? `<ol class="reference-list">${references.map(referenceHtml).join("")}</ol>` : ""}
     </div>
     ${moreMenuHtml(`<button type="button" data-edit-wish="${wish.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-wish="${wish.id}">מחיקה</button>`)}
@@ -3268,6 +3351,7 @@ function attachScreenEvents() {
   document.querySelector("[data-add-wish-category]")?.addEventListener("click", addWishCategory);
   document.querySelector("[data-rename-wish-category]")?.addEventListener("click", renameWishCategory);
   document.querySelector("[data-delete-wish-category]")?.addEventListener("click", deleteWishCategory);
+  setupWishCategoryDragHandles();
 
   document.querySelector("[data-start-trip]")?.addEventListener("click", () => startTripPacking());
   document.querySelector("[data-finish-trip]")?.addEventListener("click", finishTrip);
@@ -3286,6 +3370,7 @@ function attachScreenEvents() {
   document.querySelector("[data-restore-selected-trip]")?.addEventListener("click", restoreSelectedTripItems);
   document.querySelector("[data-restore-all-trip]")?.addEventListener("click", restoreAllTripItems);
   document.querySelector("[data-delete-archived-trip]")?.addEventListener("click", permanentlyDeleteArchivedTripItems);
+  setupMoreMenus();
 }
 
 
@@ -3421,10 +3506,130 @@ function startTaskPointerDrag(event) {
 
 function persistTaskOrderFromDom() {
   const orderedIds = [...document.querySelectorAll("[data-task-list] [data-task-id]")].map((row) => row.dataset.taskId);
+  state.taskOrderMode = "manual";
   const orderMap = new Map(orderedIds.map((id, index) => [id, index]));
   state.tasks.sort((a, b) => (orderMap.get(a.id) ?? 99999) - (orderMap.get(b.id) ?? 99999));
   state.tasks.forEach((task, index) => { task.order = index; });
   saveState("סדר הסידורים נשמר");
+  render();
+}
+
+function wishCategoryInsertBefore(target, clientX, clientY) {
+  const rect = target.getBoundingClientRect();
+  const verticalDistance = Math.abs(clientY - (rect.top + rect.height / 2));
+  if (verticalDistance < rect.height * 0.34) {
+    return getComputedStyle(target).direction === "rtl"
+      ? clientX > rect.left + rect.width / 2
+      : clientX < rect.left + rect.width / 2;
+  }
+  return clientY < rect.top + rect.height / 2;
+}
+
+function setupWishCategoryDragHandles() {
+  const list = document.querySelector("[data-wish-category-list]");
+  const cards = [...document.querySelectorAll("[data-wish-category-card][draggable='true']")];
+  if (!list || cards.length < 2) return;
+
+  cards.forEach((card) => {
+    const handle = card.querySelector("[data-wish-category-drag-handle]");
+    if (!handle) return;
+    handle.addEventListener("pointerdown", startWishCategoryPointerDrag);
+    handle.addEventListener("mousedown", () => { card.dataset.dragReady = "true"; });
+
+    card.addEventListener("dragstart", (event) => {
+      if (card.dataset.dragReady !== "true") {
+        event.preventDefault();
+        return;
+      }
+      wishCategoryDragState = { card, list, desktop: true, active: true };
+      card.classList.add("dragging");
+      document.body.classList.add("wish-category-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", card.dataset.wishCategoryCard || "");
+    });
+
+    card.addEventListener("dragover", (event) => {
+      const drag = wishCategoryDragState;
+      if (!drag?.desktop || !drag.active || drag.card === card || drag.list !== list) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (wishCategoryInsertBefore(card, event.clientX, event.clientY)) list.insertBefore(drag.card, card);
+      else list.insertBefore(drag.card, card.nextSibling);
+    });
+
+    card.addEventListener("drop", (event) => {
+      if (!wishCategoryDragState?.desktop) return;
+      event.preventDefault();
+    });
+
+    card.addEventListener("dragend", () => {
+      if (!wishCategoryDragState?.desktop) return;
+      const draggedCard = wishCategoryDragState.card;
+      draggedCard.classList.remove("dragging");
+      draggedCard.removeAttribute("data-drag-ready");
+      document.body.classList.remove("wish-category-dragging");
+      wishCategoryDragState = null;
+      persistWishCategoryOrderFromDom();
+    });
+  });
+}
+
+function startWishCategoryPointerDrag(event) {
+  if (event.pointerType === "mouse") return;
+  if (event.button !== undefined && event.button !== 0) return;
+  const handle = event.currentTarget;
+  const card = handle.closest("[data-wish-category-card]");
+  const list = card?.closest("[data-wish-category-list]");
+  if (!card || !list) return;
+  event.preventDefault();
+  const pointerId = event.pointerId;
+  const drag = { handle, card, list, pointerId, active: true };
+  wishCategoryDragState = drag;
+  card.classList.add("dragging");
+  document.body.classList.add("wish-category-dragging");
+  try { handle.setPointerCapture(pointerId); } catch (error) { /* no-op */ }
+
+  const move = (moveEvent) => {
+    if (wishCategoryDragState !== drag || moveEvent.pointerId !== pointerId) return;
+    if (moveEvent.cancelable) moveEvent.preventDefault();
+    const target = document.elementFromPoint(moveEvent.clientX, moveEvent.clientY)?.closest("[data-wish-category-card]");
+    if (target && target !== card && target.closest("[data-wish-category-list]") === list) {
+      if (wishCategoryInsertBefore(target, moveEvent.clientX, moveEvent.clientY)) list.insertBefore(card, target);
+      else list.insertBefore(card, target.nextSibling);
+    }
+
+    const edge = 70;
+    if (moveEvent.clientY < edge) window.scrollBy({ top: -18, behavior: "auto" });
+    else if (moveEvent.clientY > window.innerHeight - edge) window.scrollBy({ top: 18, behavior: "auto" });
+  };
+
+  const finish = (endEvent) => {
+    if (endEvent.pointerId !== pointerId) return;
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", finish);
+    window.removeEventListener("pointercancel", finish);
+    try { handle.releasePointerCapture(pointerId); } catch (error) { /* no-op */ }
+    card.classList.remove("dragging");
+    document.body.classList.remove("wish-category-dragging");
+    if (wishCategoryDragState === drag) wishCategoryDragState = null;
+    persistWishCategoryOrderFromDom();
+  };
+
+  window.addEventListener("pointermove", move, { passive: false });
+  window.addEventListener("pointerup", finish);
+  window.addEventListener("pointercancel", finish);
+}
+
+function persistWishCategoryOrderFromDom() {
+  const list = document.querySelector("[data-wish-category-list]");
+  if (!list) return;
+  const visibleOrder = [...list.querySelectorAll("[data-wish-category-card]")]
+    .map((card) => card.dataset.wishCategoryCard)
+    .filter(Boolean);
+  if (!visibleOrder.length) return;
+  const visibleSet = new Set(visibleOrder);
+  state.wishCategories = [...visibleOrder, ...wishCategories().filter((category) => !visibleSet.has(category))];
+  saveState("סדר קטגוריות התכנונים נשמר");
   render();
 }
 

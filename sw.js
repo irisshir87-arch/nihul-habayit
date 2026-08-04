@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-28-event-menu-fix";
+const CACHE = "nihul-habayit-v15-29-lists-order-and-menu-fix";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {
