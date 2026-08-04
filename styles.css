@@ -2370,3 +2370,38 @@ body.wish-category-dragging {
   .item-expand-label { font-size: 10px; }
   .wish-description { font-size: 11px; }
 }
+
+
+/* V15.31 — גרירה בלחיצה ממושכת ואייקון טעינה נקי */
+.task-compact-row.task-draggable-row {
+  grid-template-columns: 24px minmax(0, 1fr) 30px !important;
+}
+.task-compact-row.task-draggable-row > .more-menu { grid-column: 3; }
+.task-drag-handle,
+.wish-category-drag-handle { display: none !important; }
+.task-compact-row.task-draggable-row,
+.wish-group-header { -webkit-touch-callout: none; }
+.task-compact-row.task-draggable-row:not(.dragging) { cursor: grab; }
+.task-compact-row.task-draggable-row.dragging,
+.wish-category-card.dragging .wish-group-header { cursor: grabbing; }
+.wish-group-header { touch-action: pan-y; }
+
+/* מחליף את הסמל הישן באייקון בית רציף, ללא תלות בפונט או באימוג׳י. */
+.brand-icon {
+  font-size: 0 !important;
+  background: linear-gradient(135deg, #e9efff, #f4eaff) !important;
+  position: relative;
+}
+.brand-icon::before {
+  content: "";
+  width: 29px;
+  height: 29px;
+  display: block;
+  background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M5 14.2 16 5l11 9.2v12.3H19.5v-7h-7v7H5V14.2Z' fill='%232859d8'/%3E%3Cpath d='M10.5 12.7v-4h4v.7' fill='%232859d8'/%3E%3C/svg%3E");
+}
+
+@media (max-width: 760px) {
+  .task-compact-row.task-draggable-row {
+    grid-template-columns: 22px minmax(0, 1fr) 28px !important;
+  }
+}

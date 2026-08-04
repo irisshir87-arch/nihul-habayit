@@ -128,6 +128,14 @@ const APP_RELEASES = Object.freeze([
       { icon: "🧾", text: "פתיחה וסגירה של פרטים פועלות באותו מבנה ברור בכל העמודים הרלוונטיים." },
     ],
   },
+  {
+    version: "15.31",
+    updates: [
+      { icon: "↕", text: "אפשר לגרור סידורים וקטגוריות תכנונים בלחיצה ממושכת על הפריט, ללא ידית של שלוש נקודות." },
+      { icon: "⌄", text: "לחיצה רגילה על שם הפריט פותחת וסוגרת את התיאור." },
+      { icon: "🏠", text: "אייקון האפליקציה במסך הטעינה הוחלף באיור נקי ורציף." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -2970,7 +2978,6 @@ function taskCompactHtml(task, completed) {
       <span class="task-title-copy"><span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span><small>${escapeHtml(task.category || "אחר")}</small></span>
       ${task.notes ? `<span class="item-expand-control"><span class="item-expand-label">${expanded ? "סגירה" : "פתיחה"}</span><span class="task-expand-icon">⌄</span></span>` : ""}
     </button>
-    <button type="button" class="task-drag-handle" data-task-drag-handle="${task.id}" aria-label="גרירת הסידור לשינוי סדר" title="גרירה לשינוי סדר">⋮⋮</button>
     ${moreMenuHtml(`<button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button>`)}
     ${task.notes ? `<div class="task-description item-collapsible-description" ${expanded ? "" : "hidden"}>${savedDescriptionHtml(task.notes)}</div>` : ""}
   </article>`;
@@ -3016,7 +3023,7 @@ function renderWishes() {
   return `<section class="planning-page">
     ${populatedCategories.length ? `<div class="category-toolbar category-filter-toolbar">
       <label class="category-filter-label">סינון<select data-wish-filter><option value="הכל">הכל</option>${populatedCategories.map((category) => `<option value="${escapeHtml(category)}" ${wishCategoryFilter === category ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select></label>
-      ${canReorderCategories ? `<span class="category-drag-hint">גררי את הידית בכותרת כדי לשנות את סדר הקטגוריות</span>` : ""}
+      ${canReorderCategories ? `<span class="category-drag-hint">לחיצה ממושכת על כותרת קטגוריה מאפשרת לגרור ולשנות את הסדר</span>` : ""}
     </div>` : ""}
     <div class="wish-group-grid" data-wish-category-list>${visibleCategories.map((category) => wishGroupHtml(category, canReorderCategories)).join("") || emptyHtml("עדיין לא נוספו תכנונים")}</div>
     <div class="category-toolbar category-management-toolbar planning-management-toolbar">
@@ -3032,7 +3039,7 @@ function wishGroupHtml(category, draggable = false) {
   const wishes = state.wishes.filter((wish) => wish.category === category).sort((a, b) => collator.compare(a.title, b.title));
   return `<section class="card wish-group-card wish-category-card" data-wish-category-card="${escapeHtml(category)}" ${draggable ? 'draggable="true"' : ""}>
     <div class="wish-group-header">
-      <div class="wish-group-title">${draggable ? `<button type="button" class="wish-category-drag-handle" data-wish-category-drag-handle aria-label="גרירת קטגוריית ${escapeHtml(category)} לשינוי סדר" title="גרירה לשינוי סדר">⋮⋮</button>` : ""}<h3>${escapeHtml(category)}</h3></div>
+      <div class="wish-group-title"><h3>${escapeHtml(category)}</h3></div>
       <span class="muted small">${wishes.length} תכנונים</span>
     </div>
     <div class="wish-list">${wishes.map(wishHtml).join("") || emptyHtml("אין תכנונים בקטגוריה")}</div>
@@ -3430,15 +3437,35 @@ function toggleTask(id) {
 }
 
 function setupTaskDragHandles() {
-  document.querySelectorAll("[data-task-drag-handle]").forEach((handle) => {
-    const row = handle.closest("[data-task-id]");
-    handle.addEventListener("pointerdown", startTaskPointerDrag);
-    handle.addEventListener("mousedown", () => {
-      if (row) row.dataset.dragReady = "true";
-    });
-  });
-
   document.querySelectorAll("[data-task-id]").forEach((row) => {
+    let longPressTimer = null;
+    let startPoint = null;
+
+    row.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || event.target.closest("button, a, input, select, textarea, summary, .more-menu")) return;
+      row.dataset.dragReady = "true";
+    });
+    row.addEventListener("mouseup", () => row.removeAttribute("data-drag-ready"));
+
+    row.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" || event.button !== 0) return;
+      if (event.target.closest("button, a, input, select, textarea, summary, .more-menu")) return;
+      startPoint = { x: event.clientX, y: event.clientY };
+      longPressTimer = window.setTimeout(() => startTaskPointerDrag(event, row), 360);
+    });
+    row.addEventListener("pointermove", (event) => {
+      if (!longPressTimer || !startPoint) return;
+      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 9) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    });
+    ["pointerup", "pointercancel"].forEach((type) => row.addEventListener(type, () => {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+      startPoint = null;
+    }));
+
     row.addEventListener("dragstart", (event) => {
       if (row.dataset.dragReady !== "true") {
         event.preventDefault();
@@ -3482,21 +3509,16 @@ function setupTaskDragHandles() {
   });
 }
 
-function startTaskPointerDrag(event) {
-  if (event.pointerType === "mouse") return;
-  if (event.button !== undefined && event.button !== 0) return;
-  const handle = event.currentTarget;
-  const row = handle.closest("[data-task-id]");
+function startTaskPointerDrag(event, row) {
   const list = row?.closest("[data-task-list]");
   if (!row || !list) return;
-  event.preventDefault();
   const pointerId = event.pointerId;
-  const drag = { handle, row, list, pointerId, active: true };
+  const drag = { row, list, pointerId, active: true };
   taskDragState = drag;
   row.classList.add("dragging");
   document.body.classList.add("task-dragging");
-  suppressTaskClickUntil = Date.now() + 450;
-  try { handle.setPointerCapture(pointerId); } catch (error) { /* no-op */ }
+  suppressTaskClickUntil = Date.now() + 600;
+  if (navigator.vibrate) navigator.vibrate(25);
 
   const move = (moveEvent) => {
     if (taskDragState !== drag || moveEvent.pointerId !== pointerId) return;
@@ -3508,7 +3530,6 @@ function startTaskPointerDrag(event) {
     });
     if (insertBefore) list.insertBefore(row, insertBefore);
     else list.appendChild(row);
-
     const edge = 70;
     if (moveEvent.clientY < edge) window.scrollBy({ top: -18, behavior: "auto" });
     else if (moveEvent.clientY > window.innerHeight - edge) window.scrollBy({ top: 18, behavior: "auto" });
@@ -3519,10 +3540,9 @@ function startTaskPointerDrag(event) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", finish);
     window.removeEventListener("pointercancel", finish);
-    try { handle.releasePointerCapture(pointerId); } catch (error) { /* no-op */ }
     row.classList.remove("dragging");
     document.body.classList.remove("task-dragging");
-    suppressTaskClickUntil = Date.now() + 450;
+    suppressTaskClickUntil = Date.now() + 600;
     if (taskDragState === drag) taskDragState = null;
     persistTaskOrderFromDom();
   };
@@ -3559,10 +3579,31 @@ function setupWishCategoryDragHandles() {
   if (!list || cards.length < 2) return;
 
   cards.forEach((card) => {
-    const handle = card.querySelector("[data-wish-category-drag-handle]");
-    if (!handle) return;
-    handle.addEventListener("pointerdown", startWishCategoryPointerDrag);
-    handle.addEventListener("mousedown", () => { card.dataset.dragReady = "true"; });
+    const header = card.querySelector(".wish-group-header");
+    if (!header) return;
+    let longPressTimer = null;
+    let startPoint = null;
+    header.addEventListener("mousedown", (event) => {
+      if (event.button === 0 && !event.target.closest("button, a, input, select, textarea")) card.dataset.dragReady = "true";
+    });
+    header.addEventListener("mouseup", () => card.removeAttribute("data-drag-ready"));
+    header.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "mouse" || event.button !== 0) return;
+      startPoint = { x: event.clientX, y: event.clientY };
+      longPressTimer = window.setTimeout(() => startWishCategoryPointerDrag(event, card), 360);
+    });
+    header.addEventListener("pointermove", (event) => {
+      if (!longPressTimer || !startPoint) return;
+      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 9) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+      }
+    });
+    ["pointerup", "pointercancel"].forEach((type) => header.addEventListener(type, () => {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+      startPoint = null;
+    }));
 
     card.addEventListener("dragstart", (event) => {
       if (card.dataset.dragReady !== "true") {
@@ -3602,11 +3643,7 @@ function setupWishCategoryDragHandles() {
   });
 }
 
-function startWishCategoryPointerDrag(event) {
-  if (event.pointerType === "mouse") return;
-  if (event.button !== undefined && event.button !== 0) return;
-  const handle = event.currentTarget;
-  const card = handle.closest("[data-wish-category-card]");
+function startWishCategoryPointerDrag(event, card) {
   const list = card?.closest("[data-wish-category-list]");
   if (!card || !list) return;
   event.preventDefault();
@@ -3615,7 +3652,7 @@ function startWishCategoryPointerDrag(event) {
   wishCategoryDragState = drag;
   card.classList.add("dragging");
   document.body.classList.add("wish-category-dragging");
-  try { handle.setPointerCapture(pointerId); } catch (error) { /* no-op */ }
+  if (navigator.vibrate) navigator.vibrate(25);
 
   const move = (moveEvent) => {
     if (wishCategoryDragState !== drag || moveEvent.pointerId !== pointerId) return;
@@ -3636,7 +3673,6 @@ function startWishCategoryPointerDrag(event) {
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", finish);
     window.removeEventListener("pointercancel", finish);
-    try { handle.releasePointerCapture(pointerId); } catch (error) { /* no-op */ }
     card.classList.remove("dragging");
     document.body.classList.remove("wish-category-dragging");
     if (wishCategoryDragState === drag) wishCategoryDragState = null;
