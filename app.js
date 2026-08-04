@@ -165,7 +165,7 @@ const APP_RELEASES = Object.freeze([
     ],
   },
   {
-    version: "15.36",
+    version: "15.37",
     updates: [
       { icon: "+", text: "פריט עם תוכן נוסף מסומן בפלוס, וכשהתוכן פתוח הסימון מתחלף למינוס." },
     ],
@@ -283,8 +283,8 @@ let editingShoppingId = null;
 let shoppingCategoryFilter = "הכל";
 let wishCategoryFilter = "הכל";
 let calendarViewDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-let eventsViewMode = "month";
-let eventsWeekDate = new Date();
+let homeCalendarViewMode = "month";
+let homeCalendarWeekDate = new Date();
 let expandedTaskIds = new Set();
 let expandedWishIds = new Set();
 let archivedTripSelection = new Set();
@@ -2048,12 +2048,17 @@ function renderHome() {
   return `
     ${notificationOptInHtml()}
     <section class="card home-calendar-card">
-      <div class="calendar-toolbar">
-        <button type="button" class="calendar-nav-button" data-calendar-prev aria-label="החודש הקודם">›</button>
-        <div><h3 class="card-title">לוח שנה</h3><strong class="calendar-month-title">${escapeHtml(monthTitle)}</strong></div>
-        <button type="button" class="calendar-nav-button" data-calendar-next aria-label="החודש הבא">‹</button>
+      <div class="home-calendar-heading">
+        <h3 class="card-title">לוח שנה</h3>
+        ${homeCalendarViewToolbarHtml()}
       </div>
-      ${calendarHtml(year, month)}
+      ${homeCalendarViewMode === "week" ? renderHomeCalendarWeek() : `
+        <div class="calendar-toolbar">
+          <button type="button" class="calendar-nav-button" data-calendar-prev aria-label="החודש הקודם">›</button>
+          <div><strong class="calendar-month-title">${escapeHtml(monthTitle)}</strong></div>
+          <button type="button" class="calendar-nav-button" data-calendar-next aria-label="החודש הבא">‹</button>
+        </div>
+        ${calendarHtml(year, month)}`}
     </section>
     <section class="card home-shopping-card">
       <div class="card-title-row home-shopping-title-row"><div><h3 class="card-title">קניות</h3><span class="muted small">${activeShopping.length} פריטים פעילים</span></div><div class="home-shopping-actions"><button type="button" class="secondary-button compact-button" data-add-shopping-item>＋ הוספת פריט</button></div></div>
@@ -2891,8 +2896,8 @@ function startOfWeek(date) {
   return start;
 }
 
-function eventsViewToolbarHtml() {
-  return `<div class="events-view-toolbar"><div class="events-view-switch" role="tablist" aria-label="בחירת תצוגת אירועים"><button type="button" class="${eventsViewMode === "month" ? "active" : ""}" data-events-view="month" role="tab" aria-selected="${eventsViewMode === "month"}">חודש</button><button type="button" class="${eventsViewMode === "week" ? "active" : ""}" data-events-view="week" role="tab" aria-selected="${eventsViewMode === "week"}">שבוע</button></div></div>`;
+function homeCalendarViewToolbarHtml() {
+  return `<div class="events-view-toolbar"><div class="events-view-switch" role="tablist" aria-label="בחירת תצוגת לוח שנה"><button type="button" class="${homeCalendarViewMode === "month" ? "active" : ""}" data-home-calendar-view="month" role="tab" aria-selected="${homeCalendarViewMode === "month"}">חודש</button><button type="button" class="${homeCalendarViewMode === "week" ? "active" : ""}" data-home-calendar-view="week" role="tab" aria-selected="${homeCalendarViewMode === "week"}">שבוע</button></div></div>`;
 }
 
 function eventWeekDayHtml(day) {
@@ -2903,13 +2908,13 @@ function eventWeekDayHtml(day) {
   return `<section class="events-week-day ${isToday ? "today" : ""}"><div class="events-week-day-heading"><h3>${escapeHtml(title)}</h3><span>${dayEvents.length}</span></div><div class="events-week-day-list">${dayEvents.length ? dayEvents.map((event) => `<div class="weekly-event-accent ${calendarParticipantClass(event)}">${eventFullHtml(event)}</div>`).join("") : `<div class="events-week-empty">אין אירועים</div>`}</div></section>`;
 }
 
-function renderEventsWeek() {
-  const weekStart = startOfWeek(eventsWeekDate);
+function renderHomeCalendarWeek() {
+  const weekStart = startOfWeek(homeCalendarWeekDate);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 6);
   const rangeLabel = `${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short" }).format(weekStart)} – ${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short", year: "numeric" }).format(weekEnd)}`;
   const days = Array.from({ length: 7 }, (_, index) => { const day = new Date(weekStart); day.setDate(day.getDate() + index); return day; });
-  return `<section class="events-week-view"><div class="events-week-navigation"><button type="button" class="calendar-nav-button" data-events-week-prev aria-label="השבוע הקודם">›</button><div><strong>${escapeHtml(rangeLabel)}</strong><button type="button" class="link-button" data-events-week-today>השבוע הנוכחי</button></div><button type="button" class="calendar-nav-button" data-events-week-next aria-label="השבוע הבא">‹</button></div><div class="events-week-list">${days.map(eventWeekDayHtml).join("")}</div></section>`;
+  return `<section class="events-week-view"><div class="events-week-navigation"><button type="button" class="calendar-nav-button" data-home-week-prev aria-label="השבוע הקודם">›</button><div><strong>${escapeHtml(rangeLabel)}</strong><button type="button" class="link-button" data-home-week-today>השבוע הנוכחי</button></div><button type="button" class="calendar-nav-button" data-home-week-next aria-label="השבוע הבא">‹</button></div><div class="events-week-list">${days.map(eventWeekDayHtml).join("")}</div></section>`;
 }
 
 function renderEvents() {
@@ -2947,7 +2952,7 @@ function renderEvents() {
     ? `<details class="events-history-card"><summary><span>אירועים קודמים</span><span class="count-pill completed">${past.length}</span></summary><div class="events-history-months">${pastKeys.map((key) => eventMonthGroupHtml(key, pastGroups.get(key) || [])).join("")}</div></details>`
     : `<details class="events-history-card"><summary><span>אירועים קודמים</span><span class="count-pill completed">0</span></summary>${emptyHtml("אין אירועים קודמים")}</details>`;
 
-  return `<section class="events-page">${googleCalendarPanelHtml()}${eventsViewToolbarHtml()}${eventsViewMode === "week" ? renderEventsWeek() : `<div class="events-month-list">${futureHtml}</div>${pastHtml}`}</section>`;
+  return `<section class="events-page">${googleCalendarPanelHtml()}<div class="events-month-list">${futureHtml}</div>${pastHtml}</section>`;
 }
 
 
@@ -3415,10 +3420,10 @@ function attachScreenEvents() {
   document.querySelector("[data-google-calendar-sync]")?.addEventListener("click", syncGoogleCalendarNow);
   document.querySelector("[data-google-calendar-calendars]")?.addEventListener("click", openGoogleCalendarPicker);
   document.querySelector("[data-google-calendar-disconnect]")?.addEventListener("click", disconnectGoogleCalendar);
-  document.querySelectorAll("[data-events-view]").forEach((button) => button.addEventListener("click", () => { eventsViewMode = button.dataset.eventsView === "week" ? "week" : "month"; render(); }));
-  document.querySelector("[data-events-week-prev]")?.addEventListener("click", () => { eventsWeekDate.setDate(eventsWeekDate.getDate() - 7); render(); });
-  document.querySelector("[data-events-week-next]")?.addEventListener("click", () => { eventsWeekDate.setDate(eventsWeekDate.getDate() + 7); render(); });
-  document.querySelector("[data-events-week-today]")?.addEventListener("click", () => { eventsWeekDate = new Date(); render(); });
+  document.querySelectorAll("[data-home-calendar-view]").forEach((button) => button.addEventListener("click", () => { homeCalendarViewMode = button.dataset.homeCalendarView === "week" ? "week" : "month"; render(); }));
+  document.querySelector("[data-home-week-prev]")?.addEventListener("click", () => { homeCalendarWeekDate.setDate(homeCalendarWeekDate.getDate() - 7); render(); });
+  document.querySelector("[data-home-week-next]")?.addEventListener("click", () => { homeCalendarWeekDate.setDate(homeCalendarWeekDate.getDate() + 7); render(); });
+  document.querySelector("[data-home-week-today]")?.addEventListener("click", () => { homeCalendarWeekDate = new Date(); render(); });
   document.querySelectorAll("[data-open-google-event]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     const calendarEvent = googleCalendarEvents.find((item) => item.id === button.dataset.openGoogleEvent);

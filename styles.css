@@ -2617,3 +2617,20 @@ body.wish-category-dragging {
 .wish-row.expanded .wish-expand-icon {
   transform: none !important;
 }
+
+
+/* V15.37 — תצוגת חודש/שבוע בלוח השנה בעמוד הבית */
+.home-calendar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.home-calendar-heading .events-view-toolbar { margin: 0; }
+.home-calendar-card .events-week-view { margin-top: 2px; }
+@media (max-width: 760px) {
+  .home-calendar-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .home-calendar-heading .events-view-toolbar,
+  .home-calendar-heading .events-view-switch { width: 100%; }
+}
