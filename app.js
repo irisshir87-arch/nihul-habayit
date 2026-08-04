@@ -129,6 +129,13 @@ const APP_RELEASES = Object.freeze([
     ],
   },
   {
+    version: "15.32",
+    updates: [
+      { icon: "⌄", text: "כפתור הפרטים הוחלף בחץ נקי ללא הכיתוב פתיחה וסגירה." },
+      { icon: "↕", text: "תוקנה גרירה בלחיצה ממושכת בסידורים ובקטגוריות התכנונים." },
+    ],
+  },
+  {
     version: "15.31",
     updates: [
       { icon: "↕", text: "אפשר לגרור סידורים וקטגוריות תכנונים בלחיצה ממושכת על הפריט, ללא ידית של שלוש נקודות." },
@@ -2976,7 +2983,7 @@ function taskCompactHtml(task, completed) {
     <button class="checkbox ${completed ? "checked" : ""}" data-task-toggle="${task.id}" aria-label="${completed ? "החזרה לביצוע" : "סימון כהושלם"}">${completed ? "✓" : ""}</button>
     <button type="button" class="task-title-button item-details-toggle" ${task.notes ? `data-task-expand="${task.id}" aria-expanded="${expanded}"` : "disabled"}>
       <span class="task-title-copy"><span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span><small>${escapeHtml(task.category || "אחר")}</small></span>
-      ${task.notes ? `<span class="item-expand-control"><span class="item-expand-label">${expanded ? "סגירה" : "פתיחה"}</span><span class="task-expand-icon">⌄</span></span>` : ""}
+      ${task.notes ? `<span class="item-expand-control" aria-hidden="true"><span class="task-expand-icon">⌄</span></span>` : ""}
     </button>
     ${moreMenuHtml(`<button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button>`)}
     ${task.notes ? `<div class="task-description item-collapsible-description" ${expanded ? "" : "hidden"}>${savedDescriptionHtml(task.notes)}</div>` : ""}
@@ -3054,7 +3061,7 @@ function wishHtml(wish) {
     <div class="wish-main">
       <button type="button" class="wish-title-button item-details-toggle" ${hasDetails ? `data-wish-expand="${wish.id}" aria-expanded="${expanded}"` : "disabled"}>
         <span class="wish-title-copy"><strong>${escapeHtml(wish.title)}</strong></span>
-        ${hasDetails ? `<span class="item-expand-control"><span class="item-expand-label">${expanded ? "סגירה" : "פתיחה"}</span><span class="wish-expand-icon">⌄</span></span>` : ""}
+        ${hasDetails ? `<span class="item-expand-control" aria-hidden="true"><span class="wish-expand-icon">⌄</span></span>` : ""}
       </button>
       ${hasDetails ? `<div class="wish-description item-collapsible-description" ${expanded ? "" : "hidden"}>
         ${wish.note ? `<div class="list-meta wish-note">${savedDescriptionHtml(wish.note)}</div>` : ""}
@@ -3455,7 +3462,7 @@ function setupTaskDragHandles() {
     });
     row.addEventListener("pointermove", (event) => {
       if (!longPressTimer || !startPoint) return;
-      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 9) {
+      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 18) {
         clearTimeout(longPressTimer);
         longPressTimer = null;
       }
@@ -3510,11 +3517,14 @@ function setupTaskDragHandles() {
 }
 
 function startTaskPointerDrag(event, row) {
+  if (event.cancelable) event.preventDefault();
   const list = row?.closest("[data-task-list]");
   if (!row || !list) return;
   const pointerId = event.pointerId;
   const drag = { row, list, pointerId, active: true };
   taskDragState = drag;
+  row.style.touchAction = "none";
+  try { row.setPointerCapture(pointerId); } catch (error) { /* pointer capture is optional */ }
   row.classList.add("dragging");
   document.body.classList.add("task-dragging");
   suppressTaskClickUntil = Date.now() + 600;
@@ -3541,6 +3551,8 @@ function startTaskPointerDrag(event, row) {
     window.removeEventListener("pointerup", finish);
     window.removeEventListener("pointercancel", finish);
     row.classList.remove("dragging");
+    row.style.touchAction = "";
+    try { if (row.hasPointerCapture(pointerId)) row.releasePointerCapture(pointerId); } catch (error) { /* ignore */ }
     document.body.classList.remove("task-dragging");
     suppressTaskClickUntil = Date.now() + 600;
     if (taskDragState === drag) taskDragState = null;
@@ -3594,7 +3606,7 @@ function setupWishCategoryDragHandles() {
     });
     header.addEventListener("pointermove", (event) => {
       if (!longPressTimer || !startPoint) return;
-      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 9) {
+      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 18) {
         clearTimeout(longPressTimer);
         longPressTimer = null;
       }
@@ -3648,7 +3660,9 @@ function startWishCategoryPointerDrag(event, card) {
   if (!card || !list) return;
   event.preventDefault();
   const pointerId = event.pointerId;
-  const drag = { handle, card, list, pointerId, active: true };
+  const drag = { card, list, pointerId, active: true };
+  card.style.touchAction = "none";
+  try { card.setPointerCapture(pointerId); } catch (error) { /* pointer capture is optional */ }
   wishCategoryDragState = drag;
   card.classList.add("dragging");
   document.body.classList.add("wish-category-dragging");
@@ -3674,6 +3688,8 @@ function startWishCategoryPointerDrag(event, card) {
     window.removeEventListener("pointerup", finish);
     window.removeEventListener("pointercancel", finish);
     card.classList.remove("dragging");
+    card.style.touchAction = "";
+    try { if (card.hasPointerCapture(pointerId)) card.releasePointerCapture(pointerId); } catch (error) { /* ignore */ }
     document.body.classList.remove("wish-category-dragging");
     if (wishCategoryDragState === drag) wishCategoryDragState = null;
     persistWishCategoryOrderFromDom();
