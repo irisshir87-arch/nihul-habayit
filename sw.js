@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-31-long-press-drag-clean-icon";
+const CACHE = "nihul-habayit-v15-36-plus-minus-details";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {

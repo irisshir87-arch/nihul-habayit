@@ -2494,3 +2494,126 @@ body.wish-category-dragging {
 @media (max-width: 760px) {
   .wish-category-drag-handle { width: 30px; height: 30px; flex-basis: 30px; }
 }
+
+/* V15.34 — מעבר בין תצוגת חודש לתצוגת שבוע בעמוד האירועים */
+.events-view-toolbar {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 16px;
+}
+.events-view-switch {
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: #fff;
+}
+.events-view-switch button {
+  min-width: 92px;
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 15px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 850;
+}
+.events-view-switch button.active {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.events-week-view { display: grid; gap: 12px; }
+.events-week-navigation {
+  direction: ltr;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  text-align: center;
+}
+.events-week-navigation > div { direction: rtl; display: grid; justify-items: center; gap: 2px; }
+.events-week-navigation strong { font-size: 15px; }
+.events-week-navigation .link-button { font-size: 11px; }
+.events-week-list { display: grid; gap: 10px; }
+.events-week-day {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+}
+.events-week-day.today { border-color: #91acf0; box-shadow: 0 0 0 2px #edf2ff; }
+.events-week-day-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 13px;
+  border-bottom: 1px solid #edf0f5;
+  background: #f7f9fc;
+}
+.events-week-day.today .events-week-day-heading { background: var(--primary-soft); color: #244dba; }
+.events-week-day-heading h3 { margin: 0; font-size: 14px; }
+.events-week-day-heading span {
+  min-width: 24px; height: 22px; display: grid; place-items: center;
+  border-radius: 999px; background: #fff; color: var(--muted); font-size: 10px; font-weight: 900;
+}
+.events-week-day-list { padding: 0 10px; }
+.events-week-empty { padding: 14px 3px; color: var(--muted); font-size: 12px; text-align: center; }
+.weekly-event-accent { border-inline-start: 4px solid #8c96a5; }
+.weekly-event-accent.participant-first { border-inline-start-color: #835bd1; background: #fcfaff; }
+.weekly-event-accent.participant-second { border-inline-start-color: #3d9a68; background: #f9fdfb; }
+.weekly-event-accent.participants-together { border-inline-start-color: #4b7bd8; background: #fafcff; }
+.weekly-event-accent.participant-unassigned { border-inline-start-color: #8c96a5; }
+.weekly-event-accent.holiday { border-inline-start-color: #d59632; background: #fffdf8; }
+.weekly-event-accent .compact-event-row { border-radius: 0; }
+
+@media (max-width: 760px) {
+  .events-view-toolbar { margin-bottom: 11px; }
+  .events-view-switch { width: 100%; }
+  .events-view-switch button { min-width: 0; padding: 8px 10px; }
+  .events-week-navigation { grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 5px; padding: 8px; }
+  .events-week-navigation strong { font-size: 13px; }
+  .events-week-day-heading { padding: 9px 10px; }
+  .events-week-day-list { padding-inline: 7px; }
+}
+
+
+/* V15.35 — סימון גרירה של ארבע נקודות, שתיים מעל שתיים */
+.drag-dot-grid {
+  width: 16px;
+  height: 16px;
+  display: block;
+  border-radius: 2px;
+  background:
+    radial-gradient(circle, currentColor 2px, transparent 2.4px) 1px 1px / 7px 7px repeat;
+  opacity: .82;
+  pointer-events: none;
+}
+.task-drag-menu > summary,
+.wish-category-drag-handle {
+  font-size: 0;
+}
+
+
+/* V15.36 — פלוס לפתיחת תוכן נוסף ומינוס לסגירה */
+.item-expand-control {
+  font-weight: 900;
+  color: var(--primary);
+}
+.task-expand-icon,
+.wish-expand-icon {
+  display: block;
+  font-size: 19px;
+  line-height: 1;
+  transition: none !important;
+  transform: none !important;
+}
+.task-draggable-row.expanded .task-expand-icon,
+.wish-row.expanded .wish-expand-icon {
+  transform: none !important;
+}

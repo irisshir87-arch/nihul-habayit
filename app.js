@@ -151,6 +151,25 @@ const APP_RELEASES = Object.freeze([
       { icon: "🏠", text: "אייקוני האפליקציה ומסך הטעינה הוחלפו בגרסה נקייה ורציפה." },
     ],
   },
+  {
+    version: "15.34",
+    updates: [
+      { icon: "📅", text: "בעמוד האירועים אפשר לעבור בין תצוגה חודשית לתצוגה שבועית." },
+      { icon: "🎨", text: "גם בתצוגה השבועית האירועים מודגשים בצבע לפי המשתתפים." },
+    ],
+  },
+  {
+    version: "15.35",
+    updates: [
+      { icon: "⠿", text: "סימון הגרירה הוחלף לארבע נקודות מסודרות, שתיים מעל שתיים." },
+    ],
+  },
+  {
+    version: "15.36",
+    updates: [
+      { icon: "+", text: "פריט עם תוכן נוסף מסומן בפלוס, וכשהתוכן פתוח הסימון מתחלף למינוס." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -264,6 +283,8 @@ let editingShoppingId = null;
 let shoppingCategoryFilter = "הכל";
 let wishCategoryFilter = "הכל";
 let calendarViewDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let eventsViewMode = "month";
+let eventsWeekDate = new Date();
 let expandedTaskIds = new Set();
 let expandedWishIds = new Set();
 let archivedTripSelection = new Set();
@@ -2864,6 +2885,33 @@ function groupEventOccurrencesByMonth(events) {
   }, new Map());
 }
 
+function startOfWeek(date) {
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12);
+  start.setDate(start.getDate() - start.getDay());
+  return start;
+}
+
+function eventsViewToolbarHtml() {
+  return `<div class="events-view-toolbar"><div class="events-view-switch" role="tablist" aria-label="בחירת תצוגת אירועים"><button type="button" class="${eventsViewMode === "month" ? "active" : ""}" data-events-view="month" role="tab" aria-selected="${eventsViewMode === "month"}">חודש</button><button type="button" class="${eventsViewMode === "week" ? "active" : ""}" data-events-view="week" role="tab" aria-selected="${eventsViewMode === "week"}">שבוע</button></div></div>`;
+}
+
+function eventWeekDayHtml(day) {
+  const key = dateKey(day);
+  const dayEvents = eventOccurrencesBetween(day, day).filter((event) => String(event.date) === key);
+  const title = new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long" }).format(day);
+  const isToday = key === dateKey(new Date());
+  return `<section class="events-week-day ${isToday ? "today" : ""}"><div class="events-week-day-heading"><h3>${escapeHtml(title)}</h3><span>${dayEvents.length}</span></div><div class="events-week-day-list">${dayEvents.length ? dayEvents.map((event) => `<div class="weekly-event-accent ${calendarParticipantClass(event)}">${eventFullHtml(event)}</div>`).join("") : `<div class="events-week-empty">אין אירועים</div>`}</div></section>`;
+}
+
+function renderEventsWeek() {
+  const weekStart = startOfWeek(eventsWeekDate);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekEnd.getDate() + 6);
+  const rangeLabel = `${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short" }).format(weekStart)} – ${new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short", year: "numeric" }).format(weekEnd)}`;
+  const days = Array.from({ length: 7 }, (_, index) => { const day = new Date(weekStart); day.setDate(day.getDate() + index); return day; });
+  return `<section class="events-week-view"><div class="events-week-navigation"><button type="button" class="calendar-nav-button" data-events-week-prev aria-label="השבוע הקודם">›</button><div><strong>${escapeHtml(rangeLabel)}</strong><button type="button" class="link-button" data-events-week-today>השבוע הנוכחי</button></div><button type="button" class="calendar-nav-button" data-events-week-next aria-label="השבוע הבא">‹</button></div><div class="events-week-list">${days.map(eventWeekDayHtml).join("")}</div></section>`;
+}
+
 function renderEvents() {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
@@ -2899,7 +2947,7 @@ function renderEvents() {
     ? `<details class="events-history-card"><summary><span>אירועים קודמים</span><span class="count-pill completed">${past.length}</span></summary><div class="events-history-months">${pastKeys.map((key) => eventMonthGroupHtml(key, pastGroups.get(key) || [])).join("")}</div></details>`
     : `<details class="events-history-card"><summary><span>אירועים קודמים</span><span class="count-pill completed">0</span></summary>${emptyHtml("אין אירועים קודמים")}</details>`;
 
-  return `<section class="events-page">${googleCalendarPanelHtml()}<div class="events-month-list">${futureHtml}</div>${pastHtml}</section>`;
+  return `<section class="events-page">${googleCalendarPanelHtml()}${eventsViewToolbarHtml()}${eventsViewMode === "week" ? renderEventsWeek() : `<div class="events-month-list">${futureHtml}</div>${pastHtml}`}</section>`;
 }
 
 
@@ -3002,9 +3050,9 @@ function taskCompactHtml(task, completed) {
     <button class="checkbox ${completed ? "checked" : ""}" data-task-toggle="${task.id}" aria-label="${completed ? "החזרה לביצוע" : "סימון כהושלם"}">${completed ? "✓" : ""}</button>
     <button type="button" class="task-title-button item-details-toggle" ${task.notes ? `data-task-expand="${task.id}" aria-expanded="${expanded}"` : "disabled"}>
       <span class="task-title-copy"><span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span><small>${escapeHtml(task.category || "אחר")}</small></span>
-      ${task.notes ? `<span class="item-expand-control" aria-hidden="true"><span class="task-expand-icon">⌄</span></span>` : ""}
+      ${task.notes ? `<span class="item-expand-control" aria-hidden="true"><span class="task-expand-icon">${expanded ? "−" : "+"}</span></span>` : ""}
     </button>
-    <details class="more-menu task-drag-menu"><summary aria-label="פעולות נוספות; לחיצה ממושכת לגרירה" data-task-drag-handle="${task.id}">⋯</summary><div class="more-menu-popover"><button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button></div></details>
+    <details class="more-menu task-drag-menu"><summary aria-label="פעולות נוספות; לחיצה ממושכת לגרירה" data-task-drag-handle="${task.id}"><span class="drag-dot-grid" aria-hidden="true"></span></summary><div class="more-menu-popover"><button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button></div></details>
     ${task.notes ? `<div class="task-description item-collapsible-description" ${expanded ? "" : "hidden"}>${savedDescriptionHtml(task.notes)}</div>` : ""}
   </article>`;
 }
@@ -3066,7 +3114,7 @@ function wishGroupHtml(category, draggable = false) {
   return `<section class="card wish-group-card wish-category-card" data-wish-category-card="${escapeHtml(category)}" ${draggable ? 'data-wish-reorderable="true"' : ""}>
     <div class="wish-group-header">
       <div class="wish-group-title"><h3>${escapeHtml(category)}</h3></div>
-      <div class="wish-group-header-actions"><span class="muted small">${wishes.length} תכנונים</span>${draggable ? `<button type="button" class="wish-category-drag-handle" aria-label="לחיצה ממושכת לגרירת הקטגוריה">⋯</button>` : ""}</div>
+      <div class="wish-group-header-actions"><span class="muted small">${wishes.length} תכנונים</span>${draggable ? `<button type="button" class="wish-category-drag-handle" aria-label="לחיצה ממושכת לגרירת הקטגוריה"><span class="drag-dot-grid" aria-hidden="true"></span></button>` : ""}</div>
     </div>
     <div class="wish-list">${wishes.map(wishHtml).join("") || emptyHtml("אין תכנונים בקטגוריה")}</div>
   </section>`;
@@ -3080,7 +3128,7 @@ function wishHtml(wish) {
     <div class="wish-main">
       <button type="button" class="wish-title-button item-details-toggle" ${hasDetails ? `data-wish-expand="${wish.id}" aria-expanded="${expanded}"` : "disabled"}>
         <span class="wish-title-copy"><strong>${escapeHtml(wish.title)}</strong></span>
-        ${hasDetails ? `<span class="item-expand-control" aria-hidden="true"><span class="wish-expand-icon">⌄</span></span>` : ""}
+        ${hasDetails ? `<span class="item-expand-control" aria-hidden="true"><span class="wish-expand-icon">${expanded ? "−" : "+"}</span></span>` : ""}
       </button>
       ${hasDetails ? `<div class="wish-description item-collapsible-description" ${expanded ? "" : "hidden"}>
         ${wish.note ? `<div class="list-meta wish-note">${savedDescriptionHtml(wish.note)}</div>` : ""}
@@ -3367,6 +3415,10 @@ function attachScreenEvents() {
   document.querySelector("[data-google-calendar-sync]")?.addEventListener("click", syncGoogleCalendarNow);
   document.querySelector("[data-google-calendar-calendars]")?.addEventListener("click", openGoogleCalendarPicker);
   document.querySelector("[data-google-calendar-disconnect]")?.addEventListener("click", disconnectGoogleCalendar);
+  document.querySelectorAll("[data-events-view]").forEach((button) => button.addEventListener("click", () => { eventsViewMode = button.dataset.eventsView === "week" ? "week" : "month"; render(); }));
+  document.querySelector("[data-events-week-prev]")?.addEventListener("click", () => { eventsWeekDate.setDate(eventsWeekDate.getDate() - 7); render(); });
+  document.querySelector("[data-events-week-next]")?.addEventListener("click", () => { eventsWeekDate.setDate(eventsWeekDate.getDate() + 7); render(); });
+  document.querySelector("[data-events-week-today]")?.addEventListener("click", () => { eventsWeekDate = new Date(); render(); });
   document.querySelectorAll("[data-open-google-event]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     const calendarEvent = googleCalendarEvents.find((item) => item.id === button.dataset.openGoogleEvent);
