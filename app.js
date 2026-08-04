@@ -143,6 +143,14 @@ const APP_RELEASES = Object.freeze([
       { icon: "🏠", text: "אייקון האפליקציה במסך הטעינה הוחלף באיור נקי ורציף." },
     ],
   },
+  {
+    version: "15.33",
+    updates: [
+      { icon: "⋯", text: "לחיצה ממושכת על כפתור שלוש הנקודות מאפשרת לגרור סידורים ולשנות את הסדר." },
+      { icon: "🎨", text: "בלוח השנה לכל משתתף ולפריטים משותפים יש צבע קבוע משלהם." },
+      { icon: "🏠", text: "אייקוני האפליקציה ומסך הטעינה הוחלפו בגרסה נקייה ורציפה." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -2036,6 +2044,17 @@ function homeShoppingCategoryHtml(category, count) {
   return `<button type="button" class="home-shopping-category" data-home-shopping-category="${escapeHtml(category)}"><span class="home-shopping-category-icon">${shoppingCategoryIcon(category)}</span><span>${escapeHtml(category)}</span><strong>${count}</strong></button>`;
 }
 
+function calendarParticipantClass(event) {
+  if (event?.isHoliday) return "holiday";
+  const participants = Array.isArray(event?.participants)
+    ? [...new Set(event.participants.filter((name) => HOUSEHOLD_MEMBERS.includes(name)))]
+    : [];
+  if (participants.length >= 2) return "participants-together";
+  if (participants[0] === HOUSEHOLD_MEMBERS[0]) return "participant-first";
+  if (participants[0] === HOUSEHOLD_MEMBERS[1]) return "participant-second";
+  return "participant-unassigned";
+}
+
 function calendarHtml(year, monthIndex) {
   const first = new Date(year, monthIndex, 1, 12);
   const daysInMonth = new Date(year, monthIndex + 1, 0, 12).getDate();
@@ -2051,7 +2070,7 @@ function calendarHtml(year, monthIndex) {
     const visibleEvents = dayEvents.slice(0, 2);
     const eventRows = visibleEvents.map((event, index) => {
       const label = event.title;
-      return `<span class="calendar-event-chip calendar-event-${index + 1} ${event.isHoliday ? "holiday" : ""}" title="${escapeHtml(label)}"><span>${escapeHtml(label)}</span></span>`;
+      return `<span class="calendar-event-chip ${calendarParticipantClass(event)}" title="${escapeHtml(label)}"><span>${escapeHtml(label)}</span></span>`;
     }).join("");
     const moreEvents = dayEvents.length > 2
       ? `<span class="calendar-more-events">+${dayEvents.length - 2} נוספים</span>`
@@ -2979,13 +2998,13 @@ function sortTasks(a, b) {
 
 function taskCompactHtml(task, completed) {
   const expanded = expandedTaskIds.has(task.id) && Boolean(task.notes);
-  return `<article class="task-compact-row task-draggable-row ${expanded ? "expanded" : ""}" data-task-id="${task.id}" data-task-completed="${completed}" draggable="true">
+  return `<article class="task-compact-row task-draggable-row ${expanded ? "expanded" : ""}" data-task-id="${task.id}" data-task-completed="${completed}">
     <button class="checkbox ${completed ? "checked" : ""}" data-task-toggle="${task.id}" aria-label="${completed ? "החזרה לביצוע" : "סימון כהושלם"}">${completed ? "✓" : ""}</button>
     <button type="button" class="task-title-button item-details-toggle" ${task.notes ? `data-task-expand="${task.id}" aria-expanded="${expanded}"` : "disabled"}>
       <span class="task-title-copy"><span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span><small>${escapeHtml(task.category || "אחר")}</small></span>
       ${task.notes ? `<span class="item-expand-control" aria-hidden="true"><span class="task-expand-icon">⌄</span></span>` : ""}
     </button>
-    ${moreMenuHtml(`<button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button>`)}
+    <details class="more-menu task-drag-menu"><summary aria-label="פעולות נוספות; לחיצה ממושכת לגרירה" data-task-drag-handle="${task.id}">⋯</summary><div class="more-menu-popover"><button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button></div></details>
     ${task.notes ? `<div class="task-description item-collapsible-description" ${expanded ? "" : "hidden"}>${savedDescriptionHtml(task.notes)}</div>` : ""}
   </article>`;
 }
@@ -3044,10 +3063,10 @@ function renderWishes() {
 
 function wishGroupHtml(category, draggable = false) {
   const wishes = state.wishes.filter((wish) => wish.category === category).sort((a, b) => collator.compare(a.title, b.title));
-  return `<section class="card wish-group-card wish-category-card" data-wish-category-card="${escapeHtml(category)}" ${draggable ? 'draggable="true"' : ""}>
+  return `<section class="card wish-group-card wish-category-card" data-wish-category-card="${escapeHtml(category)}" ${draggable ? 'data-wish-reorderable="true"' : ""}>
     <div class="wish-group-header">
       <div class="wish-group-title"><h3>${escapeHtml(category)}</h3></div>
-      <span class="muted small">${wishes.length} תכנונים</span>
+      <div class="wish-group-header-actions"><span class="muted small">${wishes.length} תכנונים</span>${draggable ? `<button type="button" class="wish-category-drag-handle" aria-label="לחיצה ממושכת לגרירת הקטגוריה">⋯</button>` : ""}</div>
     </div>
     <div class="wish-list">${wishes.map(wishHtml).join("") || emptyHtml("אין תכנונים בקטגוריה")}</div>
   </section>`;
@@ -3444,79 +3463,43 @@ function toggleTask(id) {
 }
 
 function setupTaskDragHandles() {
-  document.querySelectorAll("[data-task-id]").forEach((row) => {
-    let longPressTimer = null;
+  document.querySelectorAll("[data-task-drag-handle]").forEach((handle) => {
+    const row = handle.closest("[data-task-id]");
+    if (!row) return;
+    let timer = null;
     let startPoint = null;
+    let longPressStarted = false;
+    const clearPending = () => { clearTimeout(timer); timer = null; startPoint = null; };
 
-    row.addEventListener("mousedown", (event) => {
-      if (event.button !== 0 || event.target.closest("button, a, input, select, textarea, summary, .more-menu")) return;
-      row.dataset.dragReady = "true";
-    });
-    row.addEventListener("mouseup", () => row.removeAttribute("data-drag-ready"));
-
-    row.addEventListener("pointerdown", (event) => {
-      if (event.pointerType === "mouse" || event.button !== 0) return;
-      if (event.target.closest("button, a, input, select, textarea, summary, .more-menu")) return;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
       startPoint = { x: event.clientX, y: event.clientY };
-      longPressTimer = window.setTimeout(() => startTaskPointerDrag(event, row), 360);
+      longPressStarted = false;
+      timer = window.setTimeout(() => {
+        timer = null;
+        longPressStarted = true;
+        const menu = handle.closest("details");
+        if (menu) menu.open = false;
+        startTaskPointerDrag(event, row, handle);
+      }, 420);
     });
-    row.addEventListener("pointermove", (event) => {
-      if (!longPressTimer || !startPoint) return;
-      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 18) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
+    handle.addEventListener("pointermove", (event) => {
+      if (!timer || !startPoint) return;
+      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 14) clearPending();
     });
-    ["pointerup", "pointercancel"].forEach((type) => row.addEventListener(type, () => {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-      startPoint = null;
-    }));
-
-    row.addEventListener("dragstart", (event) => {
-      if (row.dataset.dragReady !== "true") {
-        event.preventDefault();
-        return;
-      }
-      const list = row.closest("[data-task-list]");
-      if (!list) return;
-      taskDragState = { row, list, active: true, desktop: true };
-      row.classList.add("dragging");
-      document.body.classList.add("task-dragging");
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", row.dataset.taskId || "");
-      suppressTaskClickUntil = Date.now() + 450;
-    });
-
-    row.addEventListener("dragover", (event) => {
-      const drag = taskDragState;
-      if (!drag?.desktop || !drag.active || drag.row === row || drag.list !== row.closest("[data-task-list]")) return;
+    handle.addEventListener("pointerup", clearPending);
+    handle.addEventListener("pointercancel", clearPending);
+    handle.addEventListener("click", (event) => {
+      if (!longPressStarted && Date.now() >= suppressTaskClickUntil) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      const rect = row.getBoundingClientRect();
-      if (event.clientY < rect.top + rect.height / 2) drag.list.insertBefore(drag.row, row);
-      else drag.list.insertBefore(drag.row, row.nextSibling);
-    });
-
-    row.addEventListener("drop", (event) => {
-      if (!taskDragState?.desktop) return;
-      event.preventDefault();
-    });
-
-    row.addEventListener("dragend", () => {
-      if (!taskDragState?.desktop) return;
-      const draggedRow = taskDragState.row;
-      draggedRow.classList.remove("dragging");
-      draggedRow.removeAttribute("data-drag-ready");
-      document.body.classList.remove("task-dragging");
-      suppressTaskClickUntil = Date.now() + 450;
-      taskDragState = null;
-      persistTaskOrderFromDom();
-    });
+      event.stopPropagation();
+      longPressStarted = false;
+    }, true);
+    handle.addEventListener("contextmenu", (event) => event.preventDefault());
   });
 }
 
-function startTaskPointerDrag(event, row) {
+function startTaskPointerDrag(event, row, handle = row) {
   if (event.cancelable) event.preventDefault();
   const list = row?.closest("[data-task-list]");
   if (!row || !list) return;
@@ -3524,7 +3507,7 @@ function startTaskPointerDrag(event, row) {
   const drag = { row, list, pointerId, active: true };
   taskDragState = drag;
   row.style.touchAction = "none";
-  try { row.setPointerCapture(pointerId); } catch (error) { /* pointer capture is optional */ }
+  try { handle.setPointerCapture(pointerId); } catch (error) { /* pointer capture is optional */ }
   row.classList.add("dragging");
   document.body.classList.add("task-dragging");
   suppressTaskClickUntil = Date.now() + 600;
@@ -3552,7 +3535,7 @@ function startTaskPointerDrag(event, row) {
     window.removeEventListener("pointercancel", finish);
     row.classList.remove("dragging");
     row.style.touchAction = "";
-    try { if (row.hasPointerCapture(pointerId)) row.releasePointerCapture(pointerId); } catch (error) { /* ignore */ }
+    try { if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId); } catch (error) { /* ignore */ }
     document.body.classList.remove("task-dragging");
     suppressTaskClickUntil = Date.now() + 600;
     if (taskDragState === drag) taskDragState = null;
@@ -3587,82 +3570,38 @@ function wishCategoryInsertBefore(target, clientX, clientY) {
 
 function setupWishCategoryDragHandles() {
   const list = document.querySelector("[data-wish-category-list]");
-  const cards = [...document.querySelectorAll("[data-wish-category-card][draggable='true']")];
+  const cards = [...document.querySelectorAll("[data-wish-category-card][data-wish-reorderable='true']")];
   if (!list || cards.length < 2) return;
-
   cards.forEach((card) => {
-    const header = card.querySelector(".wish-group-header");
-    if (!header) return;
-    let longPressTimer = null;
+    const handle = card.querySelector(".wish-category-drag-handle");
+    if (!handle) return;
+    let timer = null;
     let startPoint = null;
-    header.addEventListener("mousedown", (event) => {
-      if (event.button === 0 && !event.target.closest("button, a, input, select, textarea")) card.dataset.dragReady = "true";
-    });
-    header.addEventListener("mouseup", () => card.removeAttribute("data-drag-ready"));
-    header.addEventListener("pointerdown", (event) => {
-      if (event.pointerType === "mouse" || event.button !== 0) return;
+    const clearPending = () => { clearTimeout(timer); timer = null; startPoint = null; };
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
       startPoint = { x: event.clientX, y: event.clientY };
-      longPressTimer = window.setTimeout(() => startWishCategoryPointerDrag(event, card), 360);
+      timer = window.setTimeout(() => startWishCategoryPointerDrag(event, card, handle), 420);
     });
-    header.addEventListener("pointermove", (event) => {
-      if (!longPressTimer || !startPoint) return;
-      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 18) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-      }
+    handle.addEventListener("pointermove", (event) => {
+      if (!timer || !startPoint) return;
+      if (Math.hypot(event.clientX - startPoint.x, event.clientY - startPoint.y) > 14) clearPending();
     });
-    ["pointerup", "pointercancel"].forEach((type) => header.addEventListener(type, () => {
-      clearTimeout(longPressTimer);
-      longPressTimer = null;
-      startPoint = null;
-    }));
-
-    card.addEventListener("dragstart", (event) => {
-      if (card.dataset.dragReady !== "true") {
-        event.preventDefault();
-        return;
-      }
-      wishCategoryDragState = { card, list, desktop: true, active: true };
-      card.classList.add("dragging");
-      document.body.classList.add("wish-category-dragging");
-      event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", card.dataset.wishCategoryCard || "");
-    });
-
-    card.addEventListener("dragover", (event) => {
-      const drag = wishCategoryDragState;
-      if (!drag?.desktop || !drag.active || drag.card === card || drag.list !== list) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "move";
-      if (wishCategoryInsertBefore(card, event.clientX, event.clientY)) list.insertBefore(drag.card, card);
-      else list.insertBefore(drag.card, card.nextSibling);
-    });
-
-    card.addEventListener("drop", (event) => {
-      if (!wishCategoryDragState?.desktop) return;
-      event.preventDefault();
-    });
-
-    card.addEventListener("dragend", () => {
-      if (!wishCategoryDragState?.desktop) return;
-      const draggedCard = wishCategoryDragState.card;
-      draggedCard.classList.remove("dragging");
-      draggedCard.removeAttribute("data-drag-ready");
-      document.body.classList.remove("wish-category-dragging");
-      wishCategoryDragState = null;
-      persistWishCategoryOrderFromDom();
-    });
+    handle.addEventListener("pointerup", clearPending);
+    handle.addEventListener("pointercancel", clearPending);
+    handle.addEventListener("click", (event) => event.preventDefault());
+    handle.addEventListener("contextmenu", (event) => event.preventDefault());
   });
 }
 
-function startWishCategoryPointerDrag(event, card) {
+function startWishCategoryPointerDrag(event, card, handle = card) {
   const list = card?.closest("[data-wish-category-list]");
   if (!card || !list) return;
   event.preventDefault();
   const pointerId = event.pointerId;
   const drag = { card, list, pointerId, active: true };
   card.style.touchAction = "none";
-  try { card.setPointerCapture(pointerId); } catch (error) { /* pointer capture is optional */ }
+  try { handle.setPointerCapture(pointerId); } catch (error) { /* pointer capture is optional */ }
   wishCategoryDragState = drag;
   card.classList.add("dragging");
   document.body.classList.add("wish-category-dragging");
@@ -3689,7 +3628,7 @@ function startWishCategoryPointerDrag(event, card) {
     window.removeEventListener("pointercancel", finish);
     card.classList.remove("dragging");
     card.style.touchAction = "";
-    try { if (card.hasPointerCapture(pointerId)) card.releasePointerCapture(pointerId); } catch (error) { /* ignore */ }
+    try { if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId); } catch (error) { /* ignore */ }
     document.body.classList.remove("wish-category-dragging");
     if (wishCategoryDragState === drag) wishCategoryDragState = null;
     persistWishCategoryOrderFromDom();

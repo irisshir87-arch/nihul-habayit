@@ -2422,3 +2422,75 @@ body.wish-category-dragging {
 .wish-group-header { -webkit-user-select: none; user-select: none; }
 .task-compact-row.task-draggable-row.dragging,
 .wish-category-card.dragging { touch-action: none !important; }
+
+
+/* V15.33 — גרירה משלוש נקודות, צבעי משתתפים ואייקון נקי */
+.task-drag-menu > summary,
+.wish-category-drag-handle {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.task-drag-menu > summary:active,
+.wish-category-drag-handle:active { cursor: grabbing; }
+.task-compact-row.task-draggable-row:not(.dragging) { cursor: default; }
+.wish-group-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.wish-category-drag-handle {
+  display: grid !important;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border: 1px solid rgba(66, 92, 150, .22);
+  border-radius: 9px;
+  background: rgba(255,255,255,.76);
+  color: #526da9;
+  font-size: 21px;
+  line-height: 1;
+  letter-spacing: 0;
+  padding: 0;
+  cursor: grab;
+}
+
+/* צבע קבוע לפי המשתתפים: איריס, תומר, שניהם או ללא שיוך. */
+.calendar-event-chip.participant-first {
+  background: #f0eaff;
+  color: #6942bb;
+  border-inline-start: 3px solid #835bd1;
+}
+.calendar-event-chip.participant-second {
+  background: #e8f6ee;
+  color: #247347;
+  border-inline-start: 3px solid #3d9a68;
+}
+.calendar-event-chip.participants-together {
+  background: #e8f1ff;
+  color: #2457b8;
+  border-inline-start: 3px solid #4b7bd8;
+}
+.calendar-event-chip.participant-unassigned {
+  background: #f1f3f6;
+  color: #626d7e;
+  border-inline-start: 3px solid #8c96a5;
+}
+.calendar-event-chip.holiday {
+  background: #fff3df;
+  color: #98600d;
+  border-inline-start: 3px solid #d59632;
+}
+
+/* בית מלא ורציף גם במסך הכניסה; קבצי PNG תואמים נכללים בעדכון. */
+.brand-icon::before {
+  width: 30px;
+  height: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%232859d8' fill-rule='evenodd' d='M7 29.5 32 8l25 21.5V56H39V39H25v17H7V29.5Zm9-2.7V49h3V33h26v16h3V26.8L32 13 16 26.8Z'/%3E%3C/svg%3E") !important;
+}
+
+@media (max-width: 760px) {
+  .wish-category-drag-handle { width: 30px; height: 30px; flex-basis: 30px; }
+}
