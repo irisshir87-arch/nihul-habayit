@@ -176,6 +176,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "🗓️", text: "התצוגה השבועית בעמוד הבית מוצגת כלוח שנה של שבעה ימים, באותו עיצוב של התצוגה החודשית." },
     ],
   },
+  {
+    version: "15.40",
+    updates: [
+      { icon: "🔎", text: "בתצוגה השבועית כל יום מוצג בכרטיס רחב יותר, כדי שאפשר יהיה לקרוא את שמות האירועים." },
+      { icon: "↔️", text: "בטלפון אפשר לגלול בין ימי השבוע, במקום לדחוס את כל שבעת הימים למסך אחד." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -2910,17 +2917,17 @@ function homeWeekCalendarCellHtml(day) {
   const key = dateKey(day);
   const today = key === dateKey(new Date());
   const dayEvents = calendarEntriesForDate(key);
-  const eventRows = dayEvents.slice(0, 2).map((event) => {
+  const dayName = new Intl.DateTimeFormat("he-IL", { weekday: "long" }).format(day);
+  const dateLabel = new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short" }).format(day);
+  const eventRows = dayEvents.map((event) => {
     const participantClass = calendarParticipantClass(event);
-    return `<span class="calendar-event-chip ${participantClass}" title="${escapeHtml(event.title)}"><span>${escapeHtml(event.title)}</span></span>`;
+    const timeLabel = event.allDay ? "כל היום" : (event.startTime || "");
+    return `<span class="calendar-event-chip ${participantClass}" title="${escapeHtml(event.title)}"><span class="week-event-title">${escapeHtml(event.title)}</span>${timeLabel ? `<small>${escapeHtml(timeLabel)}</small>` : ""}</span>`;
   }).join("");
-  const moreEvents = dayEvents.length > 2
-    ? `<span class="calendar-more-events">+${dayEvents.length - 2} נוספים</span>`
-    : "";
 
   return `<div class="calendar-day ${today ? "today" : ""} ${dayEvents.length ? "has-events" : ""}" data-calendar-day="${key}" role="button" tabindex="0" aria-label="${escapeHtml(new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long" }).format(day))}${dayEvents.length ? `, ${dayEvents.length} אירועים` : ""}">
-    <div class="calendar-day-number">${day.getDate()}</div>
-    <div class="calendar-day-events">${eventRows}${moreEvents}</div>
+    <div class="home-week-day-heading"><strong>${escapeHtml(dayName)}</strong><span>${escapeHtml(dateLabel)}</span></div>
+    <div class="calendar-day-events">${eventRows || `<span class="home-week-empty">אין אירועים</span>`}</div>
   </div>`;
 }
 
@@ -2934,17 +2941,13 @@ function renderHomeCalendarWeek() {
     day.setDate(day.getDate() + index);
     return day;
   });
-  const weekdayHeaders = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
-    .map((label) => `<div class="calendar-day head">${label}</div>`)
-    .join("");
-
   return `<section class="home-week-calendar-view">
     <div class="home-week-navigation">
       <button type="button" class="calendar-nav-button" data-home-week-prev aria-label="השבוע הקודם">›</button>
       <div><strong>${escapeHtml(rangeLabel)}</strong><button type="button" class="link-button" data-home-week-today>השבוע הנוכחי</button></div>
       <button type="button" class="calendar-nav-button" data-home-week-next aria-label="השבוע הבא">‹</button>
     </div>
-    <div class="home-calendar-week-grid">${weekdayHeaders}${days.map(homeWeekCalendarCellHtml).join("")}</div>
+    <div class="home-calendar-week-scroll"><div class="home-calendar-week-grid">${days.map(homeWeekCalendarCellHtml).join("")}</div></div>
   </section>`;
 }
 

@@ -2739,3 +2739,85 @@ body.wish-category-dragging {
   .home-calendar-week-grid .calendar-event-chip { padding: 2px 3px; border-radius: 5px; font-size: 8px; }
   .home-calendar-week-grid .calendar-more-events { padding: 1px 2px; font-size: 7px; }
 }
+
+
+/* V15.40 — שבוע קריא: כרטיס יום רחב במקום שבעה תאים דחוסים */
+.home-calendar-week-scroll {
+  width: 100%;
+  overflow-x: auto;
+  padding: 2px 1px 8px;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.home-calendar-week-grid {
+  grid-template-columns: repeat(7, minmax(150px, 1fr)) !important;
+  min-width: 1050px;
+  align-items: stretch;
+}
+.home-calendar-week-grid > .calendar-day:not(.head) {
+  min-height: 170px;
+  padding: 10px;
+  overflow: visible;
+  scroll-snap-align: start;
+}
+.home-week-day-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid #edf0f5;
+}
+.home-week-day-heading strong { font-size: 14px; }
+.home-week-day-heading span { color: var(--muted); font-size: 11px; font-weight: 800; }
+.home-calendar-week-grid .calendar-day-events { gap: 6px; margin-top: 0; }
+.home-calendar-week-grid .calendar-event-chip {
+  display: grid !important;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+}
+.home-calendar-week-grid .calendar-event-chip span {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.home-calendar-week-grid .calendar-event-chip small {
+  color: currentColor;
+  opacity: .72;
+  font-size: 9px;
+  font-weight: 750;
+}
+.home-week-empty {
+  padding: 12px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+@media (min-width: 1100px) {
+  .home-calendar-week-grid { min-width: 0; grid-template-columns: repeat(7, minmax(0, 1fr)) !important; }
+}
+@media (max-width: 760px) {
+  .home-calendar-week-grid {
+    display: flex !important;
+    min-width: max-content;
+    gap: 9px;
+  }
+  .home-calendar-week-grid > .calendar-day:not(.head) {
+    flex: 0 0 min(72vw, 260px);
+    min-height: 190px;
+    padding: 11px;
+    border-radius: 12px;
+  }
+  .home-calendar-week-grid .calendar-event-chip {
+    padding: 8px 9px;
+    font-size: 12px;
+  }
+  .home-week-day-heading strong { font-size: 15px; }
+  .home-week-day-heading span { font-size: 12px; }
+}

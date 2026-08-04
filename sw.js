@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-39-week-calendar-fixed-grid";
+const CACHE = "nihul-habayit-v15-40-readable-week-cards";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {
