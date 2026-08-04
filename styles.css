@@ -2634,3 +2634,29 @@ body.wish-category-dragging {
   .home-calendar-heading .events-view-toolbar,
   .home-calendar-heading .events-view-switch { width: 100%; }
 }
+
+
+/* V15.38 — תצוגה שבועית כלוח שנה של שבעה ימים */
+.home-week-calendar-view { display: grid; gap: 10px; }
+.home-week-calendar { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; text-align: initial; }
+.home-week-calendar .calendar-day.head { min-height: auto; padding: 5px 2px; border: 0; background: transparent; text-align: center; }
+.home-week-calendar .home-week-day { min-width: 0; min-height: 105px; padding: 6px; border: 1px solid #e8ecf3; border-radius: 11px; background: #fff; overflow: hidden; cursor: pointer; }
+.home-week-calendar .home-week-day:hover { border-color: #adc0ee; }
+.home-week-calendar .home-week-day.today { color: var(--text); border-color: #7fa3f3; background: #f5f8ff; }
+.home-week-calendar .calendar-day-number { width: 24px; height: 24px; display: grid; place-items: center; margin-inline-start: auto; border-radius: 50%; font-size: 12px; font-weight: 850; }
+.home-week-calendar .home-week-day.today .calendar-day-number { background: var(--primary); color: #fff; }
+.home-week-calendar .calendar-day-events { display: grid; gap: 3px; margin-top: 4px; }
+.home-week-calendar .calendar-event-chip.participant-first { background: #f0eaff; color: #6f45bd; }
+.home-week-calendar .calendar-event-chip.participant-second { background: #eaf8ef; color: #247a49; }
+.home-week-calendar .calendar-event-chip.participants-together { background: #eaf0ff; color: #2859d8; }
+.home-week-calendar .calendar-event-chip.participant-unassigned { background: #eef1f5; color: #657084; }
+.home-week-calendar .calendar-event-chip.holiday { background: #fff3df; color: #98600d; }
+@media (max-width: 760px) {
+  .home-week-calendar { gap: 3px; }
+  .home-week-calendar .home-week-day { min-height: 70px; padding: 3px; border-radius: 8px; }
+  .home-week-calendar .calendar-day.head { padding: 3px 1px; }
+  .home-week-calendar .calendar-day-number { width: 20px; height: 20px; font-size: 10px; }
+  .home-week-calendar .calendar-day-events { margin-top: 2px; gap: 1px; }
+  .home-week-calendar .calendar-event-chip { padding: 2px 3px; border-radius: 5px; font-size: 8px; }
+  .home-week-calendar .calendar-more-events { padding: 1px 2px; font-size: 7px; }
+}
