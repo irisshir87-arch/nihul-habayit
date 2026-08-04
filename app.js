@@ -201,6 +201,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "📅", text: "התצוגה השבועית נכנסת במלואה לרוחב המסך, עם שמות ימים קצרים וללא גלילה לצד." },
     ],
   },
+  {
+    version: "15.44",
+    updates: [
+      { icon: "↔️", text: "תוקנו כיווני החצים והמעבר בין שבועות בתצוגה השבועית." },
+      { icon: "📖", text: "תאי הימים הוארכו וטקסט האירועים מוצג במלואו ללא קיצור." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -2960,11 +2967,16 @@ function renderHomeCalendarWeek() {
     day.setDate(day.getDate() + index);
     return day;
   });
+  const currentWeekKey = dateKey(startOfWeek(new Date()));
+  const viewedWeekKey = dateKey(weekStart);
+  const todayButton = currentWeekKey === viewedWeekKey
+    ? ""
+    : `<button type="button" class="link-button" data-home-week-today>חזרה לשבוע הנוכחי</button>`;
   return `<section class="home-week-calendar-view">
     <div class="home-week-navigation">
-      <button type="button" class="calendar-nav-button" data-home-week-prev aria-label="השבוע הקודם">›</button>
-      <div><strong>${escapeHtml(rangeLabel)}</strong><button type="button" class="link-button" data-home-week-today>השבוע הנוכחי</button></div>
-      <button type="button" class="calendar-nav-button" data-home-week-next aria-label="השבוע הבא">‹</button>
+      <button type="button" class="calendar-nav-button" data-home-week-prev aria-label="השבוע הקודם">‹</button>
+      <div><strong>${escapeHtml(rangeLabel)}</strong>${todayButton}</div>
+      <button type="button" class="calendar-nav-button" data-home-week-next aria-label="השבוע הבא">›</button>
     </div>
     <div class="home-calendar-week-scroll"><div class="home-calendar-week-grid">${days.map(homeWeekCalendarCellHtml).join("")}</div></div>
   </section>`;
@@ -3474,9 +3486,28 @@ function attachScreenEvents() {
   document.querySelector("[data-google-calendar-calendars]")?.addEventListener("click", openGoogleCalendarPicker);
   document.querySelector("[data-google-calendar-disconnect]")?.addEventListener("click", disconnectGoogleCalendar);
   document.querySelectorAll("[data-home-calendar-view]").forEach((button) => button.addEventListener("click", () => { homeCalendarViewMode = button.dataset.homeCalendarView === "week" ? "week" : "month"; render(); }));
-  document.querySelector("[data-home-week-prev]")?.addEventListener("click", () => { homeCalendarWeekDate.setDate(homeCalendarWeekDate.getDate() - 7); render(); });
-  document.querySelector("[data-home-week-next]")?.addEventListener("click", () => { homeCalendarWeekDate.setDate(homeCalendarWeekDate.getDate() + 7); render(); });
-  document.querySelector("[data-home-week-today]")?.addEventListener("click", () => { homeCalendarWeekDate = new Date(); render(); });
+  document.querySelector("[data-home-week-prev]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextDate = new Date(homeCalendarWeekDate);
+    nextDate.setDate(nextDate.getDate() - 7);
+    homeCalendarWeekDate = nextDate;
+    render();
+  });
+  document.querySelector("[data-home-week-next]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextDate = new Date(homeCalendarWeekDate);
+    nextDate.setDate(nextDate.getDate() + 7);
+    homeCalendarWeekDate = nextDate;
+    render();
+  });
+  document.querySelector("[data-home-week-today]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    homeCalendarWeekDate = new Date();
+    render();
+  });
   document.querySelectorAll("[data-open-google-event]").forEach((button) => button.addEventListener("click", (event) => {
     event.stopPropagation();
     const calendarEvent = googleCalendarEvents.find((item) => item.id === button.dataset.openGoogleEvent);
