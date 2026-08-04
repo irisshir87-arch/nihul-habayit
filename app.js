@@ -183,6 +183,18 @@ const APP_RELEASES = Object.freeze([
       { icon: "↔️", text: "בטלפון אפשר לגלול בין ימי השבוע, במקום לדחוס את כל שבעת הימים למסך אחד." },
     ],
   },
+  {
+    version: "15.41",
+    updates: [
+      { icon: "🗓️", text: "התצוגה השבועית מסודרת בשני טורים ונכנסת כולה למסך ללא גלילה לצד." },
+    ],
+  },
+  {
+    version: "15.42",
+    updates: [
+      { icon: "📅", text: "בתצוגה השבועית כל שבעת ימי השבוע מוצגים בשורה אחת, ללא גלילה לצד." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
