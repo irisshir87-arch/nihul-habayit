@@ -2660,3 +2660,82 @@ body.wish-category-dragging {
   .home-week-calendar .calendar-event-chip { padding: 2px 3px; border-radius: 5px; font-size: 8px; }
   .home-week-calendar .calendar-more-events { padding: 1px 2px; font-size: 7px; }
 }
+
+
+/* V15.39 — תצוגה שבועית קשיחה כלוח זהה ללוח החודשי */
+.home-week-calendar-view {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.home-week-navigation {
+  direction: ltr;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.home-week-navigation > div {
+  direction: rtl;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+}
+.home-calendar-week-grid {
+  display: grid !important;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+  grid-auto-flow: row !important;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  text-align: initial;
+}
+.home-calendar-week-grid > .calendar-day.head {
+  min-height: auto;
+  padding: 5px 2px;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  color: var(--muted);
+  font-weight: 800;
+}
+.home-calendar-week-grid > .calendar-day:not(.head) {
+  min-width: 0;
+  min-height: 105px;
+  padding: 6px;
+  border: 1px solid #e8ecf3;
+  border-radius: 11px;
+  background: #fff;
+  overflow: hidden;
+  cursor: pointer;
+}
+.home-calendar-week-grid > .calendar-day:not(.head):hover { border-color: #adc0ee; }
+.home-calendar-week-grid > .calendar-day.today {
+  color: var(--text);
+  border-color: #7fa3f3;
+  background: #f5f8ff;
+}
+.home-calendar-week-grid .calendar-day-number {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  margin-inline-start: auto;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 850;
+}
+.home-calendar-week-grid .calendar-day.today .calendar-day-number { background: var(--primary); color: #fff; }
+.home-calendar-week-grid .calendar-day-events { display: grid; gap: 3px; margin-top: 4px; }
+@media (max-width: 760px) {
+  .home-week-navigation { grid-template-columns: 34px minmax(0, 1fr) 34px; gap: 5px; }
+  .home-calendar-week-grid { gap: 3px; }
+  .home-calendar-week-grid > .calendar-day:not(.head) { min-height: 70px; padding: 3px; border-radius: 8px; }
+  .home-calendar-week-grid > .calendar-day.head { padding: 3px 1px; }
+  .home-calendar-week-grid .calendar-day-number { width: 20px; height: 20px; font-size: 10px; }
+  .home-calendar-week-grid .calendar-day-events { margin-top: 2px; gap: 1px; }
+  .home-calendar-week-grid .calendar-event-chip { padding: 2px 3px; border-radius: 5px; font-size: 8px; }
+  .home-calendar-week-grid .calendar-more-events { padding: 1px 2px; font-size: 7px; }
+}

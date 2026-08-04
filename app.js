@@ -2908,17 +2908,17 @@ function homeCalendarViewToolbarHtml() {
 
 function homeWeekCalendarCellHtml(day) {
   const key = dateKey(day);
-  const isToday = key === dateKey(new Date());
-  const entries = calendarEntriesForDate(key);
-  const visibleEvents = entries.slice(0, 2);
-  const eventRows = visibleEvents.map((event) => {
+  const today = key === dateKey(new Date());
+  const dayEvents = calendarEntriesForDate(key);
+  const eventRows = dayEvents.slice(0, 2).map((event) => {
     const participantClass = calendarParticipantClass(event);
     return `<span class="calendar-event-chip ${participantClass}" title="${escapeHtml(event.title)}"><span>${escapeHtml(event.title)}</span></span>`;
   }).join("");
-  const moreEvents = entries.length > 2
-    ? `<span class="calendar-more-events">+${entries.length - 2} נוספים</span>`
+  const moreEvents = dayEvents.length > 2
+    ? `<span class="calendar-more-events">+${dayEvents.length - 2} נוספים</span>`
     : "";
-  return `<div class="calendar-day home-week-day ${isToday ? "today" : ""} ${entries.length ? "has-events" : ""}" data-calendar-day="${key}" role="button" tabindex="0" aria-label="${escapeHtml(new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long" }).format(day))}${entries.length ? `, ${entries.length} אירועים` : ""}">
+
+  return `<div class="calendar-day ${today ? "today" : ""} ${dayEvents.length ? "has-events" : ""}" data-calendar-day="${key}" role="button" tabindex="0" aria-label="${escapeHtml(new Intl.DateTimeFormat("he-IL", { weekday: "long", day: "numeric", month: "long" }).format(day))}${dayEvents.length ? `, ${dayEvents.length} אירועים` : ""}">
     <div class="calendar-day-number">${day.getDate()}</div>
     <div class="calendar-day-events">${eventRows}${moreEvents}</div>
   </div>`;
@@ -2937,9 +2937,14 @@ function renderHomeCalendarWeek() {
   const weekdayHeaders = ["א", "ב", "ג", "ד", "ה", "ו", "ש"]
     .map((label) => `<div class="calendar-day head">${label}</div>`)
     .join("");
+
   return `<section class="home-week-calendar-view">
-    <div class="events-week-navigation"><button type="button" class="calendar-nav-button" data-home-week-prev aria-label="השבוע הקודם">›</button><div><strong>${escapeHtml(rangeLabel)}</strong><button type="button" class="link-button" data-home-week-today>השבוע הנוכחי</button></div><button type="button" class="calendar-nav-button" data-home-week-next aria-label="השבוע הבא">‹</button></div>
-    <div class="calendar home-week-calendar">${weekdayHeaders}${days.map(homeWeekCalendarCellHtml).join("")}</div>
+    <div class="home-week-navigation">
+      <button type="button" class="calendar-nav-button" data-home-week-prev aria-label="השבוע הקודם">›</button>
+      <div><strong>${escapeHtml(rangeLabel)}</strong><button type="button" class="link-button" data-home-week-today>השבוע הנוכחי</button></div>
+      <button type="button" class="calendar-nav-button" data-home-week-next aria-label="השבוע הבא">‹</button>
+    </div>
+    <div class="home-calendar-week-grid">${weekdayHeaders}${days.map(homeWeekCalendarCellHtml).join("")}</div>
   </section>`;
 }
 
