@@ -121,6 +121,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "א", text: "סידורים מסודרים כברירת מחדל לפי שם הנושא, ועדיין אפשר לקבוע סדר ידני בגרירה." },
     ],
   },
+  {
+    version: "15.30",
+    updates: [
+      { icon: "⌄", text: "תיאורים ורשימות בסידורים ובתכנונים נשארים סגורים עד שלוחצים על פתיחה." },
+      { icon: "🧾", text: "פתיחה וסגירה של פרטים פועלות באותו מבנה ברור בכל העמודים הרלוונטיים." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -235,6 +242,7 @@ let shoppingCategoryFilter = "הכל";
 let wishCategoryFilter = "הכל";
 let calendarViewDate = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let expandedTaskIds = new Set();
+let expandedWishIds = new Set();
 let archivedTripSelection = new Set();
 let taskDragState = null;
 let wishCategoryDragState = null;
@@ -2958,12 +2966,13 @@ function taskCompactHtml(task, completed) {
   const expanded = expandedTaskIds.has(task.id) && Boolean(task.notes);
   return `<article class="task-compact-row task-draggable-row ${expanded ? "expanded" : ""}" data-task-id="${task.id}" data-task-completed="${completed}" draggable="true">
     <button class="checkbox ${completed ? "checked" : ""}" data-task-toggle="${task.id}" aria-label="${completed ? "החזרה לביצוע" : "סימון כהושלם"}">${completed ? "✓" : ""}</button>
-    <button type="button" class="task-title-button" ${task.notes ? `data-task-expand="${task.id}" aria-expanded="${expanded}"` : "disabled"}>
-      <span class="task-title-copy"><span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span><small>${escapeHtml(task.category || "אחר")}</small></span>${task.notes ? `<span class="task-expand-icon">⌄</span>` : ""}
+    <button type="button" class="task-title-button item-details-toggle" ${task.notes ? `data-task-expand="${task.id}" aria-expanded="${expanded}"` : "disabled"}>
+      <span class="task-title-copy"><span class="list-title ${completed ? "strike" : ""}">${escapeHtml(task.title)}</span><small>${escapeHtml(task.category || "אחר")}</small></span>
+      ${task.notes ? `<span class="item-expand-control"><span class="item-expand-label">${expanded ? "סגירה" : "פתיחה"}</span><span class="task-expand-icon">⌄</span></span>` : ""}
     </button>
     <button type="button" class="task-drag-handle" data-task-drag-handle="${task.id}" aria-label="גרירת הסידור לשינוי סדר" title="גרירה לשינוי סדר">⋮⋮</button>
     ${moreMenuHtml(`<button type="button" data-edit-task="${task.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-task="${task.id}">מחיקה</button>`)}
-    ${task.notes ? `<div class="task-description" ${expanded ? "" : "hidden"}>${savedDescriptionHtml(task.notes)}</div>` : ""}
+    ${task.notes ? `<div class="task-description item-collapsible-description" ${expanded ? "" : "hidden"}>${savedDescriptionHtml(task.notes)}</div>` : ""}
   </article>`;
 }
 
@@ -3032,12 +3041,30 @@ function wishGroupHtml(category, draggable = false) {
 
 function wishHtml(wish) {
   const references = Array.isArray(wish.references) ? wish.references : [];
-  return `<article class="wish-row">
-    <div class="wish-main"><strong>${escapeHtml(wish.title)}</strong>${wish.note ? `<div class="list-meta wish-note">${savedDescriptionHtml(wish.note)}</div>` : ""}
-      ${references.length ? `<ol class="reference-list">${references.map(referenceHtml).join("")}</ol>` : ""}
+  const hasDetails = Boolean(wish.note || references.length);
+  const expanded = expandedWishIds.has(wish.id) && hasDetails;
+  return `<article class="wish-row ${expanded ? "expanded" : ""}">
+    <div class="wish-main">
+      <button type="button" class="wish-title-button item-details-toggle" ${hasDetails ? `data-wish-expand="${wish.id}" aria-expanded="${expanded}"` : "disabled"}>
+        <span class="wish-title-copy"><strong>${escapeHtml(wish.title)}</strong></span>
+        ${hasDetails ? `<span class="item-expand-control"><span class="item-expand-label">${expanded ? "סגירה" : "פתיחה"}</span><span class="wish-expand-icon">⌄</span></span>` : ""}
+      </button>
+      ${hasDetails ? `<div class="wish-description item-collapsible-description" ${expanded ? "" : "hidden"}>
+        ${wish.note ? `<div class="list-meta wish-note">${savedDescriptionHtml(wish.note)}</div>` : ""}
+        ${references.length ? `<ol class="reference-list">${references.map(referenceHtml).join("")}</ol>` : ""}
+      </div>` : ""}
     </div>
     ${moreMenuHtml(`<button type="button" data-edit-wish="${wish.id}">עריכה</button><button type="button" class="danger-menu-item" data-delete-wish="${wish.id}">מחיקה</button>`)}
   </article>`;
+}
+
+function toggleWishDescription(id) {
+  const wish = state.wishes.find((item) => item.id === id);
+  const references = Array.isArray(wish?.references) ? wish.references : [];
+  if (!wish || (!wish.note && !references.length)) return;
+  if (expandedWishIds.has(id)) expandedWishIds.delete(id);
+  else expandedWishIds.add(id);
+  render();
 }
 
 function referenceHtml(reference, index) {
@@ -3345,6 +3372,7 @@ function attachScreenEvents() {
   document.querySelector("[data-add-task-category]")?.addEventListener("click", addTaskCategory);
   setupTaskDragHandles();
 
+  document.querySelectorAll("[data-wish-expand]").forEach((button) => button.addEventListener("click", () => toggleWishDescription(button.dataset.wishExpand)));
   document.querySelectorAll("[data-edit-wish]").forEach((button) => button.addEventListener("click", () => openEditDialog("wishes", button.dataset.editWish)));
   document.querySelectorAll("[data-delete-wish]").forEach((button) => button.addEventListener("click", () => deleteFrom("wishes", button.dataset.deleteWish)));
   document.querySelector("[data-wish-filter]")?.addEventListener("change", (event) => { wishCategoryFilter = event.target.value; render(); });

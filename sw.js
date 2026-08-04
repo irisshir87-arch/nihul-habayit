@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-29-lists-order-and-menu-fix";
+const CACHE = "nihul-habayit-v15-30-collapsed-descriptions";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {

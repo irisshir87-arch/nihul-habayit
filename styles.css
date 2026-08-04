@@ -2299,3 +2299,74 @@ body.wish-category-dragging {
   .category-drag-hint { line-height: 1.4; }
   .wish-category-drag-handle { width: 30px; height: 30px; flex-basis: 30px; }
 }
+
+
+/* v15.30: descriptions stay collapsed until the user opens them */
+.item-details-toggle {
+  min-width: 0;
+}
+.item-expand-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+.item-expand-label { line-height: 1; }
+.item-collapsible-description {
+  margin-top: 4px;
+}
+
+.wish-title-button {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: right;
+}
+.wish-title-button:disabled {
+  opacity: 1;
+  color: var(--text);
+  cursor: default;
+}
+.wish-title-copy {
+  min-width: 0;
+  overflow: hidden;
+}
+.wish-title-copy strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.wish-expand-icon {
+  color: var(--muted);
+  transition: transform .15s ease;
+}
+.wish-row.expanded .wish-expand-icon { transform: rotate(180deg); }
+.wish-description {
+  margin: 4px 0 2px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #f7f9fc;
+  color: #586477;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.wish-description .wish-note { margin-top: 0; }
+.wish-description .reference-list { margin-bottom: 0; }
+
+@media (max-width: 760px) {
+  .item-expand-label { font-size: 10px; }
+  .wish-description { font-size: 11px; }
+}
