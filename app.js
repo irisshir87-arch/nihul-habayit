@@ -106,6 +106,12 @@ const APP_RELEASES = Object.freeze([
       { icon: "📅", text: "אירוע שנוצר באפליקציה יכול להישמר ביומן Google של המארגן ולהתעדכן בו גם לאחר עריכה או ביטול." },
     ],
   },
+  {
+    version: "15.28",
+    updates: [
+      { icon: "⋮", text: "תפריט העריכה והמחיקה באירועים נשאר גלוי גם כשהאירוע קרוב לכרטיס של החודש הבא." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],

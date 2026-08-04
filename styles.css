@@ -2187,3 +2187,29 @@ body.task-dragging { touch-action: none; overscroll-behavior: contain; }
   .event-participants-fieldset .member-choice-grid { grid-template-columns: 1fr 1fr; }
   .event-participants-fieldset .member-choice { padding: 10px; }
 }
+
+
+/* v15.28: keep event action menus above adjacent month cards */
+.events-month-group,
+.events-month-group .events-card,
+.events-month-group .compact-event-list {
+  overflow: visible;
+}
+
+.compact-event-row {
+  position: relative;
+}
+
+.compact-event-row .more-menu[open] {
+  z-index: 250;
+}
+
+.compact-event-row .more-menu[open] .more-menu-popover {
+  z-index: 260;
+}
+
+/* Open upward near the bottom of a month card so the menu stays fully visible. */
+.compact-event-list > .compact-event-row:nth-last-child(-n + 2) .more-menu-popover {
+  top: auto;
+  bottom: calc(100% + 6px);
+}
