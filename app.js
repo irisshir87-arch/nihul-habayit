@@ -208,6 +208,12 @@ const APP_RELEASES = Object.freeze([
       { icon: "📖", text: "תאי הימים הוארכו וטקסט האירועים מוצג במלואו ללא קיצור." },
     ],
   },
+  {
+    version: "15.45",
+    updates: [
+      { icon: "🚪", text: "נוסף במסך ניהול המשפחות כפתור התנתקות ברור מחשבון האדמין.", adminOnly: true },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -1928,7 +1934,16 @@ function renderAdminFamilies() {
     <span>כל משתמש יפתח את הקישור במייל ויבחר לעצמו סיסמה.</span>
   </section>` : "";
 
+  const adminEmail = String(currentUser?.email || "").trim();
+
   return `<section class="admin-page">
+    <section class="admin-session-card">
+      <div class="admin-session-copy">
+        <span class="admin-session-icon" aria-hidden="true">🔐</span>
+        <div><strong>מחוברת כמנהלת האפליקציה</strong>${adminEmail ? `<span>${escapeHtml(adminEmail)}</span>` : ""}</div>
+      </div>
+      <button type="button" class="admin-sign-out-button" data-admin-sign-out>התנתקות</button>
+    </section>
     ${success}
     <section class="card admin-create-card">
       <div class="admin-card-heading">
@@ -3439,6 +3454,10 @@ function attachScreenEvents() {
   document.querySelector("#create-family-form")?.addEventListener("submit", submitCreateFamily);
   document.querySelector("#admin-password-reset-form")?.addEventListener("submit", submitAdminPasswordReset);
   document.querySelector("[data-add-admin-member]")?.addEventListener("click", addAdminMemberRow);
+  document.querySelector("[data-admin-sign-out]")?.addEventListener("click", async () => {
+    if (!window.confirm("להתנתק מחשבון מנהלת האפליקציה?")) return;
+    await signOutCurrentUser();
+  });
   document.querySelector("[data-enable-push]")?.addEventListener("click", enablePushNotifications);
   document.querySelector("[data-push-help]")?.addEventListener("click", openPushBlockedHelpDialog);
   attachAdminMemberRemoveEvents();
