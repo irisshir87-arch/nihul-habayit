@@ -235,6 +235,12 @@ const APP_RELEASES = Object.freeze([
       { icon: "⋮", text: "עריכה ומחיקה עברו לתפריט שלוש נקודות כדי לשמור על מסך נקי ונוח במובייל." },
     ],
   },
+  {
+    version: "15.49",
+    updates: [
+      { icon: "•••", text: "תוקנה תצוגת כפתור שלוש הנקודות במשימות ההכנה במובייל." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -3187,7 +3193,7 @@ function eventPrepSectionHtml(event, occurrenceStartDate) {
         <span>${escapeHtml(assigneeLabel)} · ${escapeHtml(eventPrepTimingLabel(task.daysBefore))}${dueLabel ? ` · ${escapeHtml(dueLabel)}` : ""}</span>
       </div>
       <details class="event-prep-task-menu">
-        <summary class="event-prep-menu-button" aria-label="פעולות למשימה ${escapeHtml(task.title)}">⋮</summary>
+        <summary class="event-prep-menu-button" aria-label="פעולות למשימה ${escapeHtml(task.title)}"><span class="event-prep-menu-dots" aria-hidden="true"></span></summary>
         <div class="event-prep-menu-popover">
           <button type="button" data-edit-event-prep="${task.id}">עריכה</button>
           <button type="button" class="danger" data-delete-event-prep="${task.id}">מחיקה</button>

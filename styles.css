@@ -3217,10 +3217,18 @@ body.wish-category-dragging {
   border-radius: 9px;
   cursor: pointer;
   color: #657184;
-  font-size: 21px;
   line-height: 1;
-  font-weight: 800;
   user-select: none;
+}
+/* V15.49 — הנקודות מצוירות ב-CSS כדי שיופיעו באופן עקבי גם במובייל */
+.event-prep-menu-dots {
+  width: 4px;
+  height: 4px;
+  display: block;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 -6px 0 currentColor, 0 6px 0 currentColor;
+  pointer-events: none;
 }
 .event-prep-task-menu[open] .event-prep-menu-button,
 .event-prep-menu-button:active { background: #f1f4f8; }
@@ -3265,6 +3273,9 @@ body.wish-category-dragging {
   .event-prep-editor-grid { grid-template-columns: 1fr; }
   .event-prep-heading { align-items: flex-start; }
   .event-prep-task-copy { gap: 5px; }
+  .event-prep-task { grid-template-columns: 26px minmax(0, 1fr) 34px; }
+  .event-prep-task-menu { display: block; min-width: 30px; visibility: visible; opacity: 1; }
+  .event-prep-menu-button { display: grid; visibility: visible; opacity: 1; }
 }
 
 
