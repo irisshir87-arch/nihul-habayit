@@ -228,6 +228,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "➕", text: "אפשר להוסיף כמה משימות הכנה, עם אחראי ומועד לכל משימה, לפני ששומרים את האירוע." },
     ],
   },
+  {
+    version: "15.48",
+    updates: [
+      { icon: "☰", text: "רשימת ההכנה לאירוע צומצמה לשורה קומפקטית לכל משימה." },
+      { icon: "⋮", text: "עריכה ומחיקה עברו לתפריט שלוש נקודות כדי לשמור על מסך נקי ונוח במובייל." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -3179,10 +3186,13 @@ function eventPrepSectionHtml(event, occurrenceStartDate) {
         <strong>${escapeHtml(task.title)}</strong>
         <span>${escapeHtml(assigneeLabel)} · ${escapeHtml(eventPrepTimingLabel(task.daysBefore))}${dueLabel ? ` · ${escapeHtml(dueLabel)}` : ""}</span>
       </div>
-      <div class="event-prep-task-actions">
-        <button type="button" class="event-prep-text-action" data-edit-event-prep="${task.id}">עריכה</button>
-        <button type="button" class="event-prep-text-action danger" data-delete-event-prep="${task.id}">מחיקה</button>
-      </div>
+      <details class="event-prep-task-menu">
+        <summary class="event-prep-menu-button" aria-label="פעולות למשימה ${escapeHtml(task.title)}">⋮</summary>
+        <div class="event-prep-menu-popover">
+          <button type="button" data-edit-event-prep="${task.id}">עריכה</button>
+          <button type="button" class="danger" data-delete-event-prep="${task.id}">מחיקה</button>
+        </div>
+      </details>
     </div>`;
   }).join("");
 
