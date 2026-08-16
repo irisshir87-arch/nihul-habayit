@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-46-event-prep";
+const CACHE = "nihul-habayit-v15-47-event-prep-create";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {

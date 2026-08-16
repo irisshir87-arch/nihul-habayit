@@ -221,6 +221,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "📆", text: "אפשר לנהל משימות הכנה גם לאירועים שמגיעים מ-Google Calendar, בלי לשנות את האירוע ב-Google." },
     ],
   },
+  {
+    version: "15.47",
+    updates: [
+      { icon: "📝", text: "אפשר להוסיף משימות לתכנית ההכנה כבר בזמן יצירת אירוע חדש." },
+      { icon: "➕", text: "אפשר להוסיף כמה משימות הכנה, עם אחראי ומועד לכל משימה, לפני ששומרים את האירוע." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -4239,6 +4246,7 @@ function showConfiguredDialog(config) {
   };
   if (dialog.open) dialog.close();
   dialog.showModal();
+  attachEventPrepDraftFormEvents();
   requestAnimationFrame(() => {
     dialog.scrollTop = 0;
     dialog.querySelector(".dialog-card")?.scrollTo({ top: 0, behavior: "auto" });
@@ -4363,6 +4371,62 @@ function eventParticipantOptionsHtml(item = null) {
   return HOUSEHOLD_MEMBERS.map((name) => `<label class="member-choice"><input name="participants" type="checkbox" value="${escapeHtml(name)}" ${selected.has(name) ? "checked" : ""} /><span>${escapeHtml(name)}</span></label>`).join("");
 }
 
+function eventPrepDraftRowHtml({ title = "", assignee = "", daysBefore = 7 } = {}) {
+  return `<div class="event-prep-draft-row" data-event-prep-draft-row>
+    <label>מה צריך לעשות?<input name="prepTitle" value="${escapeHtml(title)}" placeholder="למשל: להזמין עוגה" /></label>
+    <div class="event-prep-editor-grid">
+      <label>אחראי<select name="prepAssignee">${eventPrepAssigneeOptionsHtml(assignee)}</select></label>
+      <label>מתי<select name="prepDaysBefore">${eventPrepTimingOptionsHtml(daysBefore)}</select></label>
+    </div>
+    <button type="button" class="event-prep-remove-draft" data-remove-event-prep-draft>הסרת המשימה</button>
+  </div>`;
+}
+
+function eventPrepCreateSectionHtml() {
+  return `<section class="event-prep-create-section">
+    <div class="event-prep-create-heading">
+      <div><strong>תכנית הכנה לאירוע</strong><small>לא חובה · אפשר להוסיף דברים שצריך לעשות לפני האירוע</small></div>
+    </div>
+    <div class="event-prep-draft-list" data-event-prep-draft-list>${eventPrepDraftRowHtml()}</div>
+    <button type="button" class="secondary-button compact-button event-prep-add-draft" data-add-event-prep-draft>＋ הוספת משימה נוספת</button>
+  </section>`;
+}
+
+function attachEventPrepDraftFormEvents() {
+  const list = dialogBody.querySelector("[data-event-prep-draft-list]");
+  if (!list) return;
+  dialogBody.querySelector("[data-add-event-prep-draft]")?.addEventListener("click", () => {
+    list.insertAdjacentHTML("beforeend", eventPrepDraftRowHtml());
+    list.querySelector("[data-event-prep-draft-row]:last-child input[name='prepTitle']")?.focus();
+  });
+  list.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-remove-event-prep-draft]");
+    if (!removeButton) return;
+    const row = removeButton.closest("[data-event-prep-draft-row]");
+    if (!row) return;
+    const rows = list.querySelectorAll("[data-event-prep-draft-row]");
+    if (rows.length === 1) {
+      row.querySelector("input[name='prepTitle']").value = "";
+      row.querySelector("select[name='prepDaysBefore']").value = "7";
+      const assigneeSelect = row.querySelector("select[name='prepAssignee']");
+      if (assigneeSelect) assigneeSelect.innerHTML = eventPrepAssigneeOptionsHtml("");
+      return;
+    }
+    row.remove();
+  });
+}
+
+function eventPrepDraftTasksFromFormData(formData) {
+  const titles = formData.getAll("prepTitle");
+  const assignees = formData.getAll("prepAssignee");
+  const timings = formData.getAll("prepDaysBefore");
+  return titles.map((value, index) => ({
+    title: String(value || "").trim(),
+    assignee: TASK_ASSIGNEES.includes(String(assignees[index] || "")) ? String(assignees[index]) : HOUSEHOLD_MEMBERS[0],
+    daysBefore: Math.max(0, Number.parseInt(String(timings[index] ?? "7"), 10) || 0),
+  })).filter((task) => task.title);
+}
+
 function eventFormHtml(item = null) {
   const allDay = Boolean(item?.allDay);
   const storedEndDate = String(item?.endDate || item?.date || "");
@@ -4386,12 +4450,14 @@ function eventFormHtml(item = null) {
     <label>הערות<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
     <label>חזרתיות<select name="recurring"><option value="none" ${item?.recurring === "none" ? "selected" : ""}>ללא חזרה</option><option value="weekly" ${item?.recurring === "weekly" ? "selected" : ""}>שבועי</option><option value="monthly" ${item?.recurring === "monthly" ? "selected" : ""}>חודשי</option><option value="yearly" ${item?.recurring === "yearly" ? "selected" : ""}>שנתי</option></select></label>
     <fieldset class="event-participants-fieldset"><legend>משתתפים</legend><div class="member-choice-grid">${eventParticipantOptionsHtml(item)}</div><small>סימון משתתף יוסיף אותו לאירוע. כאשר השמירה ב-Google פעילה, הוא יקבל גם זימון במייל.</small></fieldset>
+    ${item ? "" : eventPrepCreateSectionHtml()}
     ${googleChoice}
     ${notificationChoiceHtml({ checked: !item, text: item ? "שליחת התראה על העדכון" : "שליחת התראה על האירוע החדש" })}
   </div>`;
 }
 
 async function submitEvent(formData, id = null) {
+  const prepDraftTasks = id ? [] : eventPrepDraftTasksFromFormData(formData);
   const allDay = formData.get("allDay") === "on";
   const date = String(formData.get("date") || "");
   const multiDay = formData.get("multiDay") === "on";
@@ -4427,6 +4493,18 @@ async function submitEvent(formData, id = null) {
       googleOwnerUserId: "",
     };
     state.events.push(savedEvent);
+    const eventKey = eventPrepKey(savedEvent, savedEvent.date);
+    prepDraftTasks.forEach((task) => {
+      state.eventPrepTasks.push({
+        id: crypto.randomUUID(),
+        eventKey,
+        title: task.title,
+        assignee: task.assignee,
+        daysBefore: task.daysBefore,
+        completed: false,
+        completedAt: null,
+      });
+    });
   }
 
   const shouldSyncGoogle = formData.get("syncGoogle") === "on" || Boolean(savedEvent.googleEventId);
