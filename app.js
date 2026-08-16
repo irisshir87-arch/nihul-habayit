@@ -214,6 +214,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "🚪", text: "נוסף במסך ניהול המשפחות כפתור התנתקות ברור מחשבון האדמין.", adminOnly: true },
     ],
   },
+  {
+    version: "15.46",
+    updates: [
+      { icon: "✅", text: "נוספה לכל אירוע תכנית הכנה עם משימות, אחראי ומועד יחסי לאירוע." },
+      { icon: "📆", text: "אפשר לנהל משימות הכנה גם לאירועים שמגיעים מ-Google Calendar, בלי לשנות את האירוע ב-Google." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -295,6 +302,7 @@ const defaultState = {
     { id: crypto.randomUUID(), title: "בדיקת שיניים לאלון", date: "2026-07-27", allDay: false, startTime: "10:00", endTime: "10:30", location: "מרפאת ד״ר לוי", notes: "", participants: ["איריס"], recurring: "none" },
     { id: crypto.randomUUID(), title: "ערב זוגי", date: "2026-07-29", allDay: false, startTime: "20:30", endTime: "23:00", location: "תל אביב", notes: "", participants: ["איריס", "תומר"], recurring: "none" },
   ],
+  eventPrepTasks: [],
   taskCategories: [...TASK_CATEGORIES],
   taskOrderMode: "title",
   tasks: [
@@ -929,6 +937,7 @@ function createEmptyHouseholdState() {
     shoppingHistory: [],
     memberEmails: { iris: "", tomer: "" },
     events: [],
+    eventPrepTasks: [],
     taskCategories: [...TASK_CATEGORIES],
     taskOrderMode: "title",
     tasks: [],
@@ -1076,6 +1085,22 @@ function normalizeState(input) {
       delete event.participantIds;
       delete event.inviteEmails;
     });
+
+    loaded.eventPrepTasks = Array.isArray(loaded.eventPrepTasks) ? loaded.eventPrepTasks : [];
+    ensureCollectionIds(loaded.eventPrepTasks);
+    loaded.eventPrepTasks = loaded.eventPrepTasks.map((task) => {
+      const daysBefore = Math.max(0, Math.min(365, Number.parseInt(task.daysBefore, 10) || 0));
+      const defaultAssignee = TASK_ASSIGNEES.includes(currentMemberName) ? currentMemberName : HOUSEHOLD_MEMBERS[0];
+      return {
+        id: task.id,
+        eventKey: String(task.eventKey || "").trim(),
+        title: String(task.title || task.name || "").trim(),
+        assignee: TASK_ASSIGNEES.includes(task.assignee) ? task.assignee : defaultAssignee,
+        daysBefore,
+        completed: Boolean(task.completed),
+        completedAt: task.completed ? String(task.completedAt || new Date().toISOString()) : null,
+      };
+    }).filter((task) => task.eventKey && task.title);
 
     loaded.tasks = Array.isArray(loaded.tasks) ? loaded.tasks : [];
     ensureCollectionIds(loaded.tasks);
@@ -3043,22 +3068,128 @@ function eventFullHtml(event) {
   const rangeLabel = isMultiDay ? `<div class="event-date-range-label">${escapeHtml(formatEventDateRange(event.date, event.endDate))}</div>` : "";
   const linkedToGoogle = Boolean(event.isGoogleEvent || event.googleEventId);
   const googleMark = linkedToGoogle ? ` <span class="google-event-mark" title="אירוע שמחובר ל-Google Calendar">Google</span>` : "";
+  const prepTasks = eventPrepTasksFor(event, event.occurrenceStartDate || event.date);
+  const prepCompleted = prepTasks.filter((task) => task.completed).length;
+  const prepStatus = prepTasks.length
+    ? `<div class="event-prep-list-status ${prepCompleted === prepTasks.length ? "complete" : ""}">✓ ${prepCompleted}/${prepTasks.length} הכנות</div>`
+    : "";
   const actions = event.isGoogleEvent
     ? (event.htmlLink ? moreMenuHtml(`<button type="button" data-open-google-event="${sourceId}">פתיחה ב-Google Calendar</button>`) : "")
     : moreMenuHtml(`${event.googleHtmlLink ? `<button type="button" data-open-linked-google-event="${sourceId}">פתיחה ב-Google Calendar</button>` : ""}<button type="button" data-edit-event="${sourceId}">עריכה</button><button type="button" data-download-ics="${sourceId}">הורדת זימון</button><button type="button" class="danger-menu-item" data-delete-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}">ביטול אירוע</button>`);
   return `<div class="compact-event-row event-summary-row ${event.isGoogleEvent ? "google-event-row" : ""}" data-view-event="${sourceId}" data-occurrence-date="${escapeHtml(event.date)}" role="button" tabindex="0" aria-label="פתיחת פרטי האירוע ${escapeHtml(event.title)}">
     <div class="compact-event-date"><strong>${date.getDate()}</strong><span>${new Intl.DateTimeFormat("he-IL", { month: "short" }).format(date)}</span></div>
-    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}${googleMark}${event.recurring && event.recurring !== "none" ? ` <span class="recurring-event-mark" title="אירוע חוזר">↻</span>` : ""}</div>${rangeLabel}</div>
+    <div class="event-title-cell"><div class="list-title">${escapeHtml(event.title)}${googleMark}${event.recurring && event.recurring !== "none" ? ` <span class="recurring-event-mark" title="אירוע חוזר">↻</span>` : ""}</div>${rangeLabel}${prepStatus}</div>
     ${actions}
   </div>`;
 }
 
 
-function openEventDetails(id, occurrenceDate = "") {
-  const event = state.events.find((existing) => existing.id === id) || googleCalendarEvents.find((existing) => existing.id === id);
-  if (!event) return;
-  const selectedDate = occurrenceDate || event.date;
-  const occurrenceStartDate = eventOccurrenceStartKeyForDate(event, selectedDate) || event.date;
+function eventPrepKey(event, occurrenceDate = "") {
+  if (!event) return "";
+  if (event.isGoogleEvent) {
+    const stableGoogleId = String(event.googleEventId || event.googleRowId || event.id || "").replace(/^google-/, "");
+    return `google:${event.connectionUserId || ""}:${stableGoogleId}`;
+  }
+  const sourceId = event.sourceEventId || event.id;
+  if (!sourceId) return "";
+  if (event.recurring && event.recurring !== "none") {
+    const occurrenceStart = occurrenceDate || event.occurrenceStartDate || event.date || "";
+    return `local:${sourceId}:${occurrenceStart}`;
+  }
+  return `local:${sourceId}`;
+}
+
+function eventPrepTasksFor(event, occurrenceDate = "") {
+  const key = eventPrepKey(event, occurrenceDate);
+  return (Array.isArray(state?.eventPrepTasks) ? state.eventPrepTasks : [])
+    .filter((task) => task.eventKey === key)
+    .sort((a, b) => Number(b.daysBefore || 0) - Number(a.daysBefore || 0) || collator.compare(a.title, b.title));
+}
+
+function eventPrepTimingLabel(daysBefore) {
+  const days = Number(daysBefore || 0);
+  if (days === 0) return "ביום האירוע";
+  if (days === 1) return "יום לפני";
+  if (days === 2) return "יומיים לפני";
+  if (days === 7) return "שבוע לפני";
+  if (days === 14) return "שבועיים לפני";
+  if (days === 30) return "חודש לפני";
+  return `${days} ימים לפני`;
+}
+
+function eventPrepDueDateLabel(eventDate, daysBefore) {
+  const dueKey = shiftDateKey(eventDate, -Math.max(0, Number(daysBefore || 0)));
+  if (!dueKey) return "";
+  const date = new Date(`${dueKey}T12:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "short" }).format(date);
+}
+
+function eventPrepAssigneeOptionsHtml(selected = "") {
+  const fallback = TASK_ASSIGNEES.includes(currentMemberName) ? currentMemberName : HOUSEHOLD_MEMBERS[0];
+  const value = TASK_ASSIGNEES.includes(selected) ? selected : fallback;
+  return TASK_ASSIGNEES.map((assignee) => `<option value="${escapeHtml(assignee)}" ${assignee === value ? "selected" : ""}>${escapeHtml(TASK_ASSIGNEE_LABELS[assignee] || assignee)}</option>`).join("");
+}
+
+function eventPrepTimingOptionsHtml(selected = 0) {
+  const options = [
+    [30, "חודש לפני"],
+    [14, "שבועיים לפני"],
+    [7, "שבוע לפני"],
+    [3, "3 ימים לפני"],
+    [2, "יומיים לפני"],
+    [1, "יום לפני"],
+    [0, "ביום האירוע"],
+  ];
+  const value = Number(selected || 0);
+  return options.map(([days, label]) => `<option value="${days}" ${days === value ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function eventPrepEditorHtml(task = null) {
+  return `<div class="event-prep-editor" data-event-prep-editor>
+    <label>מה צריך לעשות?<input type="text" data-event-prep-title value="${escapeHtml(task?.title || "")}" placeholder="למשל: להזמין עוגה" /></label>
+    <div class="event-prep-editor-grid">
+      <label>אחראי<select data-event-prep-assignee>${eventPrepAssigneeOptionsHtml(task?.assignee || "")}</select></label>
+      <label>מתי<select data-event-prep-days>${eventPrepTimingOptionsHtml(task?.daysBefore || 0)}</select></label>
+    </div>
+    <div class="event-prep-editor-actions">
+      <button type="button" class="primary-button compact-button" data-save-event-prep="${escapeHtml(task?.id || "")}">${task ? "שמירת שינוי" : "הוספת משימה"}</button>
+      <button type="button" class="secondary-button compact-button" data-cancel-event-prep>ביטול</button>
+    </div>
+  </div>`;
+}
+
+function eventPrepSectionHtml(event, occurrenceStartDate) {
+  const tasks = eventPrepTasksFor(event, occurrenceStartDate);
+  const completed = tasks.filter((task) => task.completed).length;
+  const progress = tasks.length ? `${completed}/${tasks.length} הושלמו` : "עדיין אין משימות";
+  const rows = tasks.map((task) => {
+    const dueLabel = eventPrepDueDateLabel(occurrenceStartDate, task.daysBefore);
+    const assigneeLabel = TASK_ASSIGNEE_LABELS[task.assignee] || task.assignee;
+    return `<div class="event-prep-task ${task.completed ? "completed" : ""}">
+      <button type="button" class="checkbox ${task.completed ? "checked" : ""}" data-toggle-event-prep="${task.id}" aria-label="${task.completed ? "החזרת המשימה לביצוע" : "סימון המשימה כבוצעה"}">${task.completed ? "✓" : ""}</button>
+      <div class="event-prep-task-copy">
+        <strong>${escapeHtml(task.title)}</strong>
+        <span>${escapeHtml(assigneeLabel)} · ${escapeHtml(eventPrepTimingLabel(task.daysBefore))}${dueLabel ? ` · ${escapeHtml(dueLabel)}` : ""}</span>
+      </div>
+      <div class="event-prep-task-actions">
+        <button type="button" class="event-prep-text-action" data-edit-event-prep="${task.id}">עריכה</button>
+        <button type="button" class="event-prep-text-action danger" data-delete-event-prep="${task.id}">מחיקה</button>
+      </div>
+    </div>`;
+  }).join("");
+
+  return `<section class="event-prep-section">
+    <div class="event-prep-heading">
+      <div><span>תכנית הכנה לאירוע</span><strong>${escapeHtml(progress)}</strong></div>
+      <button type="button" class="secondary-button compact-button" data-add-event-prep>＋ משימה</button>
+    </div>
+    <div class="event-prep-list">${rows || `<div class="event-prep-empty">הוסיפו כאן דברים שצריך להכין לפני האירוע.</div>`}</div>
+    <div class="event-prep-form-slot" data-event-prep-form-slot></div>
+  </section>`;
+}
+
+function eventDetailsHtml(event, occurrenceStartDate) {
   const occurrenceEndDate = eventOccurrenceEndKey(event, occurrenceStartDate);
   const dateLabel = formatEventDateRange(occurrenceStartDate, occurrenceEndDate, { weekday: true });
   const timeLabel = event.allDay
@@ -3067,11 +3198,7 @@ function openEventDetails(id, occurrenceDate = "") {
   const recurrenceLabels = { none: "ללא חזרה", weekly: "שבועי", monthly: "חודשי", yearly: "שנתי" };
   const participants = Array.isArray(event.participants) ? event.participants : [];
 
-  dialogEyebrow.textContent = "פרטי אירוע";
-  dialogTitle.textContent = event.title;
-  dialogSubmit.hidden = true;
-  dialogForm.onsubmit = null;
-  dialogBody.innerHTML = `<div class="event-details-list">
+  return `<div class="event-details-list">
     <div class="event-detail-row"><span>${occurrenceStartDate === occurrenceEndDate ? "תאריך" : "תאריכים"}</span><strong>${escapeHtml(dateLabel)}</strong></div>
     <div class="event-detail-row"><span>שעה</span><strong>${escapeHtml(timeLabel)}</strong></div>
     ${event.location ? `<div class="event-detail-row"><span>מקום</span><strong>${escapeHtml(event.location)}</strong></div>` : ""}
@@ -3080,7 +3207,84 @@ function openEventDetails(id, occurrenceDate = "") {
     ${event.recurring && event.recurring !== "none" ? `<div class="event-detail-row"><span>חזרתיות</span><strong>${escapeHtml(recurrenceLabels[event.recurring] || event.recurring)}</strong></div>` : ""}
     ${event.isGoogleEvent ? `<div class="event-detail-row"><span>מקור</span><strong>Google Calendar · לקריאה בלבד</strong></div>${event.htmlLink ? `<a class="primary-button google-open-link" href="${escapeHtml(event.htmlLink)}" target="_blank" rel="noopener">פתיחה ב-Google Calendar</a>` : ""}` : ""}
     ${event.googleEventId ? `<div class="event-detail-row"><span>זימון</span><strong>נשמר ב-Google Calendar ונשלח למשתתפים</strong></div>${event.googleHtmlLink ? `<a class="primary-button google-open-link" href="${escapeHtml(event.googleHtmlLink)}" target="_blank" rel="noopener">פתיחה ב-Google Calendar</a>` : ""}` : ""}
-  </div>`;
+  </div>${eventPrepSectionHtml(event, occurrenceStartDate)}`;
+}
+
+function refreshEventDetailsBody(event, occurrenceStartDate) {
+  dialogBody.innerHTML = eventDetailsHtml(event, occurrenceStartDate);
+  attachEventPrepDialogEvents(event, occurrenceStartDate);
+}
+
+function showEventPrepEditor(event, occurrenceStartDate, taskId = "") {
+  const slot = dialogBody.querySelector("[data-event-prep-form-slot]");
+  if (!slot) return;
+  const task = taskId ? state.eventPrepTasks.find((item) => item.id === taskId && item.eventKey === eventPrepKey(event, occurrenceStartDate)) : null;
+  slot.innerHTML = eventPrepEditorHtml(task);
+  const titleInput = slot.querySelector("[data-event-prep-title]");
+  titleInput?.focus();
+  slot.querySelector("[data-cancel-event-prep]")?.addEventListener("click", () => { slot.innerHTML = ""; });
+  slot.querySelector("[data-save-event-prep]")?.addEventListener("click", () => {
+    const title = String(slot.querySelector("[data-event-prep-title]")?.value || "").trim();
+    if (!title) return showToast("יש לכתוב מה צריך לעשות");
+    const assignee = String(slot.querySelector("[data-event-prep-assignee]")?.value || HOUSEHOLD_MEMBERS[0]);
+    const daysBefore = Math.max(0, Number.parseInt(slot.querySelector("[data-event-prep-days]")?.value || "0", 10) || 0);
+    if (task) {
+      Object.assign(task, { title, assignee, daysBefore });
+    } else {
+      state.eventPrepTasks.push({
+        id: crypto.randomUUID(),
+        eventKey: eventPrepKey(event, occurrenceStartDate),
+        title,
+        assignee,
+        daysBefore,
+        completed: false,
+        completedAt: null,
+      });
+    }
+    saveState(task ? "משימת ההכנה עודכנה" : "משימת ההכנה נוספה");
+    refreshEventDetailsBody(event, occurrenceStartDate);
+  });
+  titleInput?.addEventListener("keydown", (keyboardEvent) => {
+    if (keyboardEvent.key === "Enter") {
+      keyboardEvent.preventDefault();
+      slot.querySelector("[data-save-event-prep]")?.click();
+    }
+  });
+}
+
+function attachEventPrepDialogEvents(event, occurrenceStartDate) {
+  dialogBody.querySelector("[data-add-event-prep]")?.addEventListener("click", () => showEventPrepEditor(event, occurrenceStartDate));
+  dialogBody.querySelectorAll("[data-edit-event-prep]").forEach((button) => button.addEventListener("click", () => showEventPrepEditor(event, occurrenceStartDate, button.dataset.editEventPrep)));
+  dialogBody.querySelectorAll("[data-toggle-event-prep]").forEach((button) => button.addEventListener("click", () => {
+    const key = eventPrepKey(event, occurrenceStartDate);
+    const task = state.eventPrepTasks.find((item) => item.id === button.dataset.toggleEventPrep && item.eventKey === key);
+    if (!task) return;
+    task.completed = !task.completed;
+    task.completedAt = task.completed ? new Date().toISOString() : null;
+    saveState(task.completed ? "משימת ההכנה הושלמה" : "משימת ההכנה הוחזרה לביצוע");
+    refreshEventDetailsBody(event, occurrenceStartDate);
+  }));
+  dialogBody.querySelectorAll("[data-delete-event-prep]").forEach((button) => button.addEventListener("click", () => {
+    const key = eventPrepKey(event, occurrenceStartDate);
+    const task = state.eventPrepTasks.find((item) => item.id === button.dataset.deleteEventPrep && item.eventKey === key);
+    if (!task || !confirm(`למחוק את משימת ההכנה „${task.title}”?`)) return;
+    state.eventPrepTasks = state.eventPrepTasks.filter((item) => item.id !== task.id);
+    saveState("משימת ההכנה נמחקה");
+    refreshEventDetailsBody(event, occurrenceStartDate);
+  }));
+}
+
+function openEventDetails(id, occurrenceDate = "") {
+  const event = state.events.find((existing) => existing.id === id) || googleCalendarEvents.find((existing) => existing.id === id);
+  if (!event) return;
+  const selectedDate = occurrenceDate || event.date;
+  const occurrenceStartDate = eventOccurrenceStartKeyForDate(event, selectedDate) || event.date;
+
+  dialogEyebrow.textContent = "פרטי אירוע";
+  dialogTitle.textContent = event.title;
+  dialogSubmit.hidden = true;
+  dialogForm.onsubmit = (submitEvent) => submitEvent.preventDefault();
+  refreshEventDetailsBody(event, occurrenceStartDate);
   if (dialog.open) dialog.close();
   dialog.showModal();
 }
@@ -3925,6 +4129,8 @@ async function removeEventSeries(eventId) {
     return;
   }
   state.events = state.events.filter((existing) => existing.id !== eventId);
+  const prepPrefix = `local:${eventId}`;
+  state.eventPrepTasks = state.eventPrepTasks.filter((task) => task.eventKey !== prepPrefix && !task.eventKey.startsWith(`${prepPrefix}:`));
   saveState(event.recurring && event.recurring !== "none" ? "סדרת האירועים בוטלה" : "האירוע בוטל");
   if (dialog.open) dialog.close();
   render();
@@ -3942,6 +4148,8 @@ async function cancelSingleEventOccurrence(eventId, occurrenceDate) {
     return;
   }
   event.excludedDates = [...new Set([...(event.excludedDates || []), occurrenceStartDate])].sort();
+  const prepKey = eventPrepKey(event, occurrenceStartDate);
+  state.eventPrepTasks = state.eventPrepTasks.filter((task) => task.eventKey !== prepKey);
   saveState("המועד הזה בוטל ושאר הסדרה נשמרה");
   if (dialog.open) dialog.close();
   render();
