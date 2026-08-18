@@ -3164,7 +3164,7 @@ body.wish-category-dragging {
 .event-prep-task {
   position: relative;
   display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) 32px;
+  grid-template-columns: 18px 26px minmax(0, 1fr) 32px;
   align-items: center;
   gap: 8px;
   min-height: 44px;
@@ -3202,6 +3202,40 @@ body.wish-category-dragging {
 .event-prep-task.completed .event-prep-task-copy strong {
   text-decoration: line-through;
   color: #7c8797;
+}
+.event-prep-drag-handle {
+  width: 18px;
+  height: 30px;
+  display: grid;
+  align-content: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  color: #a5adba;
+}
+.event-prep-drag-handle:active { cursor: grabbing; color: #6f7b8d; }
+.event-prep-drag-handle i {
+  width: 11px;
+  height: 2px;
+  display: block;
+  border-radius: 2px;
+  background: currentColor;
+}
+.event-prep-task.dragging {
+  z-index: 2;
+  opacity: .72;
+  border-radius: 10px;
+  background: #f2f6ff;
+  box-shadow: 0 4px 14px rgba(42, 67, 110, .12);
+}
+.event-prep-drag-hint {
+  margin-top: -4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
 }
 .event-prep-task-menu {
   position: relative;
@@ -3273,7 +3307,7 @@ body.wish-category-dragging {
   .event-prep-editor-grid { grid-template-columns: 1fr; }
   .event-prep-heading { align-items: flex-start; }
   .event-prep-task-copy { gap: 5px; }
-  .event-prep-task { grid-template-columns: 26px minmax(0, 1fr) 34px; }
+  .event-prep-task { grid-template-columns: 18px 26px minmax(0, 1fr) 34px; }
   .event-prep-task-menu { display: block; min-width: 30px; visibility: visible; opacity: 1; }
   .event-prep-menu-button { display: grid; visibility: visible; opacity: 1; }
 }
@@ -3281,16 +3315,40 @@ body.wish-category-dragging {
 
 /* V15.47 — תכנית הכנה כבר ביצירת אירוע */
 .event-prep-create-section {
-  display: grid;
-  gap: 11px;
-  padding: 14px;
   border: 1px solid #dce5ff;
   border-radius: 14px;
   background: #f8faff;
+  overflow: hidden;
 }
-.event-prep-create-heading > div { display: grid; gap: 3px; }
-.event-prep-create-heading strong { font-size: 14px; color: var(--text); }
-.event-prep-create-heading small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.event-prep-create-summary {
+  min-height: 54px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.event-prep-create-summary::-webkit-details-marker { display: none; }
+.event-prep-create-summary > span { display: grid; gap: 3px; }
+.event-prep-create-summary strong { font-size: 14px; color: var(--text); }
+.event-prep-create-summary small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.event-prep-create-chevron {
+  font-style: normal;
+  color: #7f8ca1;
+  font-size: 18px;
+  line-height: 1;
+  transition: transform .18s ease;
+}
+.event-prep-create-section[open] .event-prep-create-chevron { transform: rotate(180deg); }
+.event-prep-create-body {
+  display: grid;
+  gap: 11px;
+  padding: 0 14px 14px;
+  border-top: 1px solid #e7ecf6;
+  padding-top: 12px;
+}
 .event-prep-draft-list { display: grid; gap: 10px; }
 .event-prep-draft-row {
   display: grid;

@@ -241,6 +241,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "•••", text: "תוקנה תצוגת כפתור שלוש הנקודות במשימות ההכנה במובייל." },
     ],
   },
+  {
+    version: "15.50",
+    updates: [
+      { icon: "▸", text: "תכנית ההכנה ביצירת אירוע סגורה כברירת מחדל ונפתחת רק בלחיצה." },
+      { icon: "↕️", text: "אפשר לגרור משימות הכנה באותו מועד כדי לקבוע את סדר העדיפות ביניהן." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -1111,16 +1118,19 @@ function normalizeState(input) {
     loaded.eventPrepTasks = loaded.eventPrepTasks.map((task) => {
       const daysBefore = Math.max(0, Math.min(365, Number.parseInt(task.daysBefore, 10) || 0));
       const defaultAssignee = TASK_ASSIGNEES.includes(currentMemberName) ? currentMemberName : HOUSEHOLD_MEMBERS[0];
+      const parsedOrder = Number.parseInt(task.order, 10);
       return {
         id: task.id,
         eventKey: String(task.eventKey || "").trim(),
         title: String(task.title || task.name || "").trim(),
         assignee: TASK_ASSIGNEES.includes(task.assignee) ? task.assignee : defaultAssignee,
         daysBefore,
+        order: Number.isFinite(parsedOrder) ? parsedOrder : null,
         completed: Boolean(task.completed),
         completedAt: task.completed ? String(task.completedAt || new Date().toISOString()) : null,
       };
     }).filter((task) => task.eventKey && task.title);
+    normalizeEventPrepTaskOrders(loaded.eventPrepTasks);
 
     loaded.tasks = Array.isArray(loaded.tasks) ? loaded.tasks : [];
     ensureCollectionIds(loaded.tasks);
@@ -3119,11 +3129,39 @@ function eventPrepKey(event, occurrenceDate = "") {
   return `local:${sourceId}`;
 }
 
+function normalizeEventPrepTaskOrders(tasks) {
+  const groups = new Map();
+  (Array.isArray(tasks) ? tasks : []).forEach((task) => {
+    const groupKey = `${task.eventKey}::${Number(task.daysBefore || 0)}`;
+    if (!groups.has(groupKey)) groups.set(groupKey, []);
+    groups.get(groupKey).push(task);
+  });
+  groups.forEach((group) => {
+    group.sort((a, b) => {
+      const aOrder = a.order !== null && a.order !== undefined && Number.isFinite(Number(a.order)) ? Number(a.order) : null;
+      const bOrder = b.order !== null && b.order !== undefined && Number.isFinite(Number(b.order)) ? Number(b.order) : null;
+      if (aOrder !== null && bOrder !== null && aOrder !== bOrder) return aOrder - bOrder;
+      if (aOrder !== null && bOrder === null) return -1;
+      if (aOrder === null && bOrder !== null) return 1;
+      return collator.compare(a.title, b.title);
+    });
+    group.forEach((task, index) => { task.order = index; });
+  });
+}
+
 function eventPrepTasksFor(event, occurrenceDate = "") {
   const key = eventPrepKey(event, occurrenceDate);
   return (Array.isArray(state?.eventPrepTasks) ? state.eventPrepTasks : [])
     .filter((task) => task.eventKey === key)
-    .sort((a, b) => Number(b.daysBefore || 0) - Number(a.daysBefore || 0) || collator.compare(a.title, b.title));
+    .sort((a, b) => Number(b.daysBefore || 0) - Number(a.daysBefore || 0) || Number(a.order || 0) - Number(b.order || 0) || collator.compare(a.title, b.title));
+}
+
+function nextEventPrepOrder(eventKey, daysBefore) {
+  const sameTime = (Array.isArray(state?.eventPrepTasks) ? state.eventPrepTasks : [])
+    .filter((task) => task.eventKey === eventKey && Number(task.daysBefore || 0) === Number(daysBefore || 0));
+  if (!sameTime.length) return 0;
+  normalizeEventPrepTaskOrders(sameTime);
+  return Math.max(...sameTime.map((task) => Number(task.order || 0))) + 1;
 }
 
 function eventPrepTimingLabel(daysBefore) {
@@ -3186,7 +3224,8 @@ function eventPrepSectionHtml(event, occurrenceStartDate) {
   const rows = tasks.map((task) => {
     const dueLabel = eventPrepDueDateLabel(occurrenceStartDate, task.daysBefore);
     const assigneeLabel = TASK_ASSIGNEE_LABELS[task.assignee] || task.assignee;
-    return `<div class="event-prep-task ${task.completed ? "completed" : ""}">
+    return `<div class="event-prep-task ${task.completed ? "completed" : ""}" data-event-prep-task-id="${task.id}" data-event-prep-days="${Number(task.daysBefore || 0)}">
+      <span class="event-prep-drag-handle" data-event-prep-drag draggable="true" role="button" tabindex="0" aria-label="גרירת המשימה לשינוי סדר" title="גרירה לשינוי סדר"><i></i><i></i><i></i></span>
       <button type="button" class="checkbox ${task.completed ? "checked" : ""}" data-toggle-event-prep="${task.id}" aria-label="${task.completed ? "החזרת המשימה לביצוע" : "סימון המשימה כבוצעה"}">${task.completed ? "✓" : ""}</button>
       <div class="event-prep-task-copy">
         <strong>${escapeHtml(task.title)}</strong>
@@ -3208,6 +3247,7 @@ function eventPrepSectionHtml(event, occurrenceStartDate) {
       <button type="button" class="secondary-button compact-button" data-add-event-prep>＋ משימה</button>
     </div>
     <div class="event-prep-list">${rows || `<div class="event-prep-empty">הוסיפו כאן דברים שצריך להכין לפני האירוע.</div>`}</div>
+    ${tasks.length > 1 ? `<div class="event-prep-drag-hint">↕ גררו משימות באותו מועד כדי לקבוע סדר עדיפות</div>` : ""}
     <div class="event-prep-form-slot" data-event-prep-form-slot></div>
   </section>`;
 }
@@ -3251,15 +3291,23 @@ function showEventPrepEditor(event, occurrenceStartDate, taskId = "") {
     if (!title) return showToast("יש לכתוב מה צריך לעשות");
     const assignee = String(slot.querySelector("[data-event-prep-assignee]")?.value || HOUSEHOLD_MEMBERS[0]);
     const daysBefore = Math.max(0, Number.parseInt(slot.querySelector("[data-event-prep-days]")?.value || "0", 10) || 0);
+    const prepKey = eventPrepKey(event, occurrenceStartDate);
     if (task) {
-      Object.assign(task, { title, assignee, daysBefore });
-    } else {
-      state.eventPrepTasks.push({
-        id: crypto.randomUUID(),
-        eventKey: eventPrepKey(event, occurrenceStartDate),
+      const movedToDifferentTime = Number(task.daysBefore || 0) !== daysBefore;
+      Object.assign(task, {
         title,
         assignee,
         daysBefore,
+        order: movedToDifferentTime ? nextEventPrepOrder(prepKey, daysBefore) : Number(task.order || 0),
+      });
+    } else {
+      state.eventPrepTasks.push({
+        id: crypto.randomUUID(),
+        eventKey: prepKey,
+        title,
+        assignee,
+        daysBefore,
+        order: nextEventPrepOrder(prepKey, daysBefore),
         completed: false,
         completedAt: null,
       });
@@ -3275,7 +3323,98 @@ function showEventPrepEditor(event, occurrenceStartDate, taskId = "") {
   });
 }
 
+function saveEventPrepOrderFromDom(event, occurrenceStartDate, daysBefore) {
+  const key = eventPrepKey(event, occurrenceStartDate);
+  const rows = [...dialogBody.querySelectorAll(`[data-event-prep-task-id][data-event-prep-days="${Number(daysBefore || 0)}"]`)];
+  if (!rows.length) return;
+  rows.forEach((row, index) => {
+    const task = state.eventPrepTasks.find((item) => item.id === row.dataset.eventPrepTaskId && item.eventKey === key);
+    if (task) task.order = index;
+  });
+  saveState("סדר משימות ההכנה עודכן");
+}
+
+function attachEventPrepDragEvents(event, occurrenceStartDate) {
+  const list = dialogBody.querySelector(".event-prep-list");
+  if (!list) return;
+  let draggedRow = null;
+  let draggedDays = null;
+  let pointerId = null;
+  let pointerMoved = false;
+
+  const moveRowNearTarget = (clientY, targetRow) => {
+    if (!draggedRow || !targetRow || targetRow === draggedRow) return;
+    if (targetRow.dataset.eventPrepDays !== String(draggedDays)) return;
+    const rect = targetRow.getBoundingClientRect();
+    if (clientY < rect.top + rect.height / 2) targetRow.before(draggedRow);
+    else targetRow.after(draggedRow);
+  };
+
+  list.querySelectorAll("[data-event-prep-drag]").forEach((handle) => {
+    const row = handle.closest("[data-event-prep-task-id]");
+    if (!row) return;
+
+    handle.addEventListener("dragstart", (dragEvent) => {
+      draggedRow = row;
+      draggedDays = row.dataset.eventPrepDays;
+      row.classList.add("dragging");
+      dragEvent.dataTransfer.effectAllowed = "move";
+      try { dragEvent.dataTransfer.setData("text/plain", row.dataset.eventPrepTaskId || ""); } catch (_) {}
+    });
+    handle.addEventListener("dragend", () => {
+      if (!draggedRow) return;
+      draggedRow.classList.remove("dragging");
+      saveEventPrepOrderFromDom(event, occurrenceStartDate, draggedDays);
+      draggedRow = null;
+      draggedDays = null;
+      refreshEventDetailsBody(event, occurrenceStartDate);
+    });
+
+    handle.addEventListener("pointerdown", (pointerEvent) => {
+      if (pointerEvent.pointerType === "mouse") return;
+      pointerEvent.preventDefault();
+      draggedRow = row;
+      draggedDays = row.dataset.eventPrepDays;
+      pointerId = pointerEvent.pointerId;
+      pointerMoved = false;
+      row.classList.add("dragging");
+      handle.setPointerCapture?.(pointerId);
+    });
+    handle.addEventListener("pointermove", (pointerEvent) => {
+      if (pointerId !== pointerEvent.pointerId || !draggedRow) return;
+      pointerEvent.preventDefault();
+      pointerMoved = true;
+      const underPointer = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY);
+      const targetRow = underPointer?.closest?.("[data-event-prep-task-id]");
+      moveRowNearTarget(pointerEvent.clientY, targetRow);
+    });
+    const finishPointerDrag = (pointerEvent) => {
+      if (pointerId !== pointerEvent.pointerId || !draggedRow) return;
+      pointerEvent.preventDefault();
+      handle.releasePointerCapture?.(pointerId);
+      draggedRow.classList.remove("dragging");
+      if (pointerMoved) saveEventPrepOrderFromDom(event, occurrenceStartDate, draggedDays);
+      draggedRow = null;
+      draggedDays = null;
+      pointerId = null;
+      pointerMoved = false;
+      refreshEventDetailsBody(event, occurrenceStartDate);
+    };
+    handle.addEventListener("pointerup", finishPointerDrag);
+    handle.addEventListener("pointercancel", finishPointerDrag);
+  });
+
+  list.addEventListener("dragover", (dragEvent) => {
+    if (!draggedRow) return;
+    const targetRow = dragEvent.target.closest?.("[data-event-prep-task-id]");
+    if (!targetRow || targetRow.dataset.eventPrepDays !== String(draggedDays)) return;
+    dragEvent.preventDefault();
+    moveRowNearTarget(dragEvent.clientY, targetRow);
+  });
+}
+
 function attachEventPrepDialogEvents(event, occurrenceStartDate) {
+  attachEventPrepDragEvents(event, occurrenceStartDate);
   dialogBody.querySelector("[data-add-event-prep]")?.addEventListener("click", () => showEventPrepEditor(event, occurrenceStartDate));
   dialogBody.querySelectorAll("[data-edit-event-prep]").forEach((button) => button.addEventListener("click", () => showEventPrepEditor(event, occurrenceStartDate, button.dataset.editEventPrep)));
   dialogBody.querySelectorAll("[data-toggle-event-prep]").forEach((button) => button.addEventListener("click", () => {
@@ -4399,13 +4538,16 @@ function eventPrepDraftRowHtml({ title = "", assignee = "", daysBefore = 7 } = {
 }
 
 function eventPrepCreateSectionHtml() {
-  return `<section class="event-prep-create-section">
-    <div class="event-prep-create-heading">
-      <div><strong>תכנית הכנה לאירוע</strong><small>לא חובה · אפשר להוסיף דברים שצריך לעשות לפני האירוע</small></div>
+  return `<details class="event-prep-create-section">
+    <summary class="event-prep-create-summary">
+      <span><strong>תכנית הכנה לאירוע</strong><small>לא חובה · לחצו כדי להוסיף משימות</small></span>
+      <i class="event-prep-create-chevron" aria-hidden="true">⌄</i>
+    </summary>
+    <div class="event-prep-create-body">
+      <div class="event-prep-draft-list" data-event-prep-draft-list>${eventPrepDraftRowHtml()}</div>
+      <button type="button" class="secondary-button compact-button event-prep-add-draft" data-add-event-prep-draft>＋ הוספת משימה נוספת</button>
     </div>
-    <div class="event-prep-draft-list" data-event-prep-draft-list>${eventPrepDraftRowHtml()}</div>
-    <button type="button" class="secondary-button compact-button event-prep-add-draft" data-add-event-prep-draft>＋ הוספת משימה נוספת</button>
-  </section>`;
+  </details>`;
 }
 
 function attachEventPrepDraftFormEvents() {
@@ -4510,16 +4652,20 @@ async function submitEvent(formData, id = null) {
     };
     state.events.push(savedEvent);
     const eventKey = eventPrepKey(savedEvent, savedEvent.date);
+    const prepOrderByTime = new Map();
     prepDraftTasks.forEach((task) => {
+      const groupOrder = prepOrderByTime.get(task.daysBefore) || 0;
       state.eventPrepTasks.push({
         id: crypto.randomUUID(),
         eventKey,
         title: task.title,
         assignee: task.assignee,
         daysBefore: task.daysBefore,
+        order: groupOrder,
         completed: false,
         completedAt: null,
       });
+      prepOrderByTime.set(task.daysBefore, groupOrder + 1);
     });
   }
 
