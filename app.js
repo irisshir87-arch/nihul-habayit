@@ -262,6 +262,13 @@ const APP_RELEASES = Object.freeze([
       { icon: "💾", text: "סדר העדיפות שנקבע בגרירה נשמר גם לאחר סגירה ופתיחה מחדש של האירוע." },
     ],
   },
+  {
+    version: "15.53",
+    updates: [
+      { icon: "↕️", text: "מנגנון הגרירה בתכנית ההכנה הוחלף לגרירה יציבה יותר במובייל." },
+      { icon: "🛒", text: "אפשר לשנות ידנית את סדר המוצרים ברשימת הקניות בגרירה ולשמור את הסדר." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -1048,6 +1055,7 @@ function normalizeState(input) {
       delete item.unitPrice;
       delete item.note;
     });
+    normalizeShoppingItemOrders(loaded.shopping);
     loaded.shoppingCategories = normalizeCategoryList(
       SHOPPING_DEFAULT_CATEGORIES,
       loaded.shoppingCategories,
@@ -2406,7 +2414,7 @@ function restoreArchivedShoppingItems(items) {
     const existing = state.shopping.find((item) => !item.purchased && normalizeName(item.name) === normalizeName(archived.name) && (item.category || "אחר") === (archived.category || "אחר"));
     if (existing) existing.quantity = Math.max(positiveInteger(existing.quantity), positiveInteger(archived.quantity));
     else {
-      const restored = { ...archived, id: crypto.randomUUID(), purchased: false, purchasedAt: null };
+      const restored = { ...archived, id: crypto.randomUUID(), purchased: false, purchasedAt: null, order: nextShoppingOrder() };
       delete restored.historyBatchId;
       state.shopping.push(restored);
     }
@@ -2454,9 +2462,34 @@ function shoppingFilterChipsHtml(activeItems) {
   }).join("");
 }
 
+function normalizeShoppingItemOrders(items) {
+  const list = Array.isArray(items) ? items : [];
+  const active = list.filter((item) => !item.purchased);
+  const purchased = list.filter((item) => item.purchased);
+  const sortGroup = (group) => [...group].sort((a, b) => {
+    const aHasOrder = Number.isFinite(Number(a.order));
+    const bHasOrder = Number.isFinite(Number(b.order));
+    if (aHasOrder && bHasOrder && Number(a.order) !== Number(b.order)) return Number(a.order) - Number(b.order);
+    if (aHasOrder !== bHasOrder) return aHasOrder ? -1 : 1;
+    return collator.compare(a.name || "", b.name || "");
+  });
+  sortGroup(active).forEach((item, index) => { item.order = index; });
+  sortGroup(purchased).forEach((item, index) => { item.order = index; });
+}
+
+function shoppingSortValue(item) {
+  return Number.isFinite(Number(item?.order)) ? Number(item.order) : 999999;
+}
+
+function nextShoppingOrder() {
+  const active = state.shopping.filter((item) => !item.purchased);
+  if (!active.length) return 0;
+  return Math.max(...active.map(shoppingSortValue).filter(Number.isFinite), -1) + 1;
+}
+
 function shoppingListHtml(items, purchased) {
   return [...items]
-    .sort((a, b) => collator.compare(a.name, b.name))
+    .sort((a, b) => shoppingSortValue(a) - shoppingSortValue(b) || collator.compare(a.name, b.name))
     .map((item) => item.id === editingShoppingId ? shoppingInlineEditHtml(item) : shoppingRowHtml(item, true))
     .join("");
 }
@@ -2518,7 +2551,11 @@ function shoppingGroupsHtml(items, purchased) {
 }
 
 function shoppingRowHtml(item, showCategory = false) {
+  const dragControl = item.purchased
+    ? `<span class="shopping-drag-spacer" aria-hidden="true"></span>`
+    : `<span class="shopping-drag-handle" data-shopping-drag-handle role="button" tabindex="0" aria-label="גרירת המוצר לשינוי סדר" title="גרירה לשינוי סדר"><i></i><i></i><i></i></span>`;
   return `<div class="shopping-row" data-shopping-row data-shopping-id="${item.id}" data-name="${escapeHtml(normalizeName(item.name))}" data-category="${escapeHtml(item.category || "אחר")}">
+    ${dragControl}
     <button class="checkbox ${item.purchased ? "checked" : ""}" data-shopping-toggle="${item.id}" aria-label="${item.purchased ? "החזרה לרשימת הקניות" : "סימון כנרכש"}">${item.purchased ? "✓" : ""}</button>
     <div class="shopping-product"><strong class="${item.purchased ? "strike" : ""}">${escapeHtml(item.name)}</strong>${showCategory && shoppingCategoryFilter === "הכל" && (item.category || "אחר") !== SHOPPING_UNCATEGORIZED ? `<small>${shoppingCategoryIcon(item.category || "אחר")} ${escapeHtml(item.category || "אחר")}</small>` : ""}</div>
     <div class="quantity-stepper always-visible" aria-label="כמות ${positiveInteger(item.quantity)}">
@@ -2532,6 +2569,7 @@ function shoppingRowHtml(item, showCategory = false) {
 
 function shoppingInlineEditHtml(item) {
   return `<div class="shopping-row is-editing" data-shopping-row data-shopping-id="${item.id}" data-name="${escapeHtml(normalizeName(item.name))}" data-category="${escapeHtml(item.category || "אחר")}">
+    <span class="shopping-drag-spacer" aria-hidden="true"></span>
     <button class="checkbox ${item.purchased ? "checked" : ""}" data-shopping-toggle="${item.id}">${item.purchased ? "✓" : ""}</button>
     <div class="shopping-edit-fields">
       <label><span>מוצר</span><input data-inline-name value="${escapeHtml(item.name)}" aria-label="שם המוצר" /></label>
@@ -2594,6 +2632,96 @@ function filterShoppingRows() {
       if (!row.hidden) visibleRows += 1;
     });
     group.hidden = visibleRows === 0;
+  });
+}
+
+
+function persistShoppingOrderFromDom() {
+  const list = document.querySelector(".shopping-unified-card .shopping-unified-list");
+  if (!list) return;
+  const visibleIds = [...list.querySelectorAll("[data-shopping-row][data-shopping-id]")]
+    .map((row) => row.dataset.shoppingId)
+    .filter(Boolean);
+  if (!visibleIds.length) return;
+
+  const activeItems = state.shopping
+    .filter((item) => !item.purchased)
+    .sort((a, b) => shoppingSortValue(a) - shoppingSortValue(b) || collator.compare(a.name, b.name));
+  const activeIds = activeItems.map((item) => item.id);
+
+  let orderedIds;
+  if (shoppingCategoryFilter === "הכל") {
+    const visibleSet = new Set(visibleIds);
+    orderedIds = [...visibleIds, ...activeIds.filter((id) => !visibleSet.has(id))];
+  } else {
+    const visibleSet = new Set(visibleIds);
+    const queue = [...visibleIds];
+    orderedIds = activeIds.map((id) => visibleSet.has(id) ? queue.shift() : id);
+  }
+
+  const orderMap = new Map(orderedIds.map((id, index) => [id, index]));
+  state.shopping.forEach((item) => {
+    if (!item.purchased && orderMap.has(item.id)) item.order = orderMap.get(item.id);
+  });
+  saveState("סדר רשימת הקניות נשמר");
+  render();
+}
+
+function setupShoppingDragHandles() {
+  const list = document.querySelector(".shopping-unified-card .shopping-unified-list");
+  if (!list) return;
+
+  list.querySelectorAll("[data-shopping-drag-handle]").forEach((handle) => {
+    const row = handle.closest("[data-shopping-row][data-shopping-id]");
+    if (!row) return;
+
+    handle.addEventListener("pointerdown", (downEvent) => {
+      if (downEvent.pointerType === "mouse" && downEvent.button !== 0) return;
+      if (downEvent.cancelable) downEvent.preventDefault();
+      downEvent.stopPropagation();
+      const pointerId = downEvent.pointerId;
+      const originalOrder = [...list.querySelectorAll("[data-shopping-row][data-shopping-id]")].map((item) => item.dataset.shoppingId || "");
+      let moved = false;
+
+      row.classList.add("shopping-dragging-row");
+      document.body.classList.add("shopping-dragging");
+      try { handle.setPointerCapture(pointerId); } catch (_) {}
+      if (navigator.vibrate) navigator.vibrate(20);
+
+      const move = (moveEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
+        if (moveEvent.cancelable) moveEvent.preventDefault();
+        moved = true;
+        const candidates = [...list.querySelectorAll("[data-shopping-row][data-shopping-id]")].filter((candidate) => candidate !== row);
+        const beforeRow = candidates.find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return moveEvent.clientY < rect.top + rect.height / 2;
+        });
+        if (beforeRow) list.insertBefore(row, beforeRow);
+        else list.appendChild(row);
+
+        const edge = 76;
+        if (moveEvent.clientY < edge) window.scrollBy({ top: -16, behavior: "auto" });
+        else if (moveEvent.clientY > window.innerHeight - edge) window.scrollBy({ top: 16, behavior: "auto" });
+      };
+
+      const finish = (endEvent) => {
+        if (endEvent.pointerId !== pointerId) return;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", finish);
+        row.classList.remove("shopping-dragging-row");
+        document.body.classList.remove("shopping-dragging");
+        try { if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId); } catch (_) {}
+        const finalOrder = [...list.querySelectorAll("[data-shopping-row][data-shopping-id]")].map((item) => item.dataset.shoppingId || "");
+        if (moved && originalOrder.join("|") !== finalOrder.join("|")) persistShoppingOrderFromDom();
+      };
+
+      window.addEventListener("pointermove", move, { passive: false });
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", finish);
+    });
+    handle.addEventListener("contextmenu", (contextEvent) => contextEvent.preventDefault());
   });
 }
 
@@ -3242,7 +3370,7 @@ function eventPrepSectionHtml(event, occurrenceStartDate) {
     const dueLabel = eventPrepDueDateLabel(occurrenceStartDate, task.daysBefore);
     const assigneeLabel = TASK_ASSIGNEE_LABELS[task.assignee] || task.assignee;
     return `<div class="event-prep-task ${task.completed ? "completed" : ""}" data-event-prep-task-id="${task.id}" data-event-prep-days="${Number(task.daysBefore || 0)}">
-      <span class="event-prep-drag-handle" data-event-prep-drag draggable="true" role="button" tabindex="0" aria-label="גרירת המשימה לשינוי סדר" title="גרירה לשינוי סדר"><i></i><i></i><i></i></span>
+      <span class="event-prep-drag-handle" data-event-prep-drag role="button" tabindex="0" aria-label="גרירת המשימה לשינוי סדר" title="גרירה לשינוי סדר"><i></i><i></i><i></i></span>
       <button type="button" class="checkbox ${task.completed ? "checked" : ""}" data-toggle-event-prep="${task.id}" aria-label="${task.completed ? "החזרת המשימה לביצוע" : "סימון המשימה כבוצעה"}">${task.completed ? "✓" : ""}</button>
       <div class="event-prep-task-copy">
         <strong>${escapeHtml(task.title)}</strong>
@@ -3355,107 +3483,66 @@ function attachEventPrepDragEvents(event, occurrenceStartDate) {
   const list = dialogBody.querySelector(".event-prep-list");
   if (!list) return;
 
-  let draggedRow = null;
-  let draggedDays = null;
-  let pointerId = null;
-  let pointerMoved = false;
-  let originalOrder = [];
-
-  const sameTimeRows = () => [...list.querySelectorAll(`[data-event-prep-task-id][data-event-prep-days="${String(draggedDays)}"]`)];
-
-  const orderIds = () => sameTimeRows().map((row) => row.dataset.eventPrepTaskId || "");
-
-  const moveDraggedRowByY = (clientY) => {
-    if (!draggedRow) return;
-    const candidates = sameTimeRows().filter((row) => row !== draggedRow);
-    if (!candidates.length) return;
-
-    const beforeRow = candidates.find((row) => {
-      const rect = row.getBoundingClientRect();
-      return clientY < rect.top + rect.height / 2;
-    });
-
-    if (beforeRow) {
-      if (draggedRow.nextElementSibling !== beforeRow) list.insertBefore(draggedRow, beforeRow);
-      return;
-    }
-
-    const lastRow = candidates[candidates.length - 1];
-    if (lastRow.nextElementSibling !== draggedRow) lastRow.after(draggedRow);
-  };
-
-  const beginDrag = (row) => {
-    draggedRow = row;
-    draggedDays = row.dataset.eventPrepDays;
-    pointerMoved = false;
-    originalOrder = orderIds();
-    row.classList.add("dragging");
-    document.body.classList.add("event-prep-dragging");
-  };
-
-  const finishDrag = () => {
-    if (!draggedRow) return;
-    const changed = pointerMoved && originalOrder.join("|") !== orderIds().join("|");
-    draggedRow.classList.remove("dragging");
-    document.body.classList.remove("event-prep-dragging");
-    if (changed) saveEventPrepOrderFromDom(event, occurrenceStartDate, draggedDays);
-    draggedRow = null;
-    draggedDays = null;
-    pointerId = null;
-    pointerMoved = false;
-    originalOrder = [];
-    if (changed) refreshEventDetailsBody(event, occurrenceStartDate);
-  };
-
   list.querySelectorAll("[data-event-prep-drag]").forEach((handle) => {
     const row = handle.closest("[data-event-prep-task-id]");
     if (!row) return;
 
-    handle.addEventListener("dragstart", (dragEvent) => {
-      beginDrag(row);
-      dragEvent.dataTransfer.effectAllowed = "move";
-      try { dragEvent.dataTransfer.setData("text/plain", row.dataset.eventPrepTaskId || ""); } catch (_) {}
+    handle.addEventListener("pointerdown", (downEvent) => {
+      if (downEvent.pointerType === "mouse" && downEvent.button !== 0) return;
+      if (downEvent.cancelable) downEvent.preventDefault();
+      downEvent.stopPropagation();
+
+      const pointerId = downEvent.pointerId;
+      const daysBefore = String(row.dataset.eventPrepDays || "0");
+      const groupRows = () => [...list.querySelectorAll(`[data-event-prep-task-id][data-event-prep-days="${CSS.escape(daysBefore)}"]`)];
+      const originalOrder = groupRows().map((item) => item.dataset.eventPrepTaskId || "");
+      let moved = false;
+
+      row.classList.add("dragging");
+      document.body.classList.add("event-prep-dragging");
+      try { handle.setPointerCapture(pointerId); } catch (_) {}
+      if (navigator.vibrate) navigator.vibrate(20);
+
+      const move = (moveEvent) => {
+        if (moveEvent.pointerId !== pointerId) return;
+        if (moveEvent.cancelable) moveEvent.preventDefault();
+        moved = true;
+
+        const candidates = groupRows().filter((candidate) => candidate !== row);
+        const beforeRow = candidates.find((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return moveEvent.clientY < rect.top + rect.height / 2;
+        });
+        if (beforeRow) list.insertBefore(row, beforeRow);
+        else if (candidates.length) candidates[candidates.length - 1].after(row);
+
+        const edge = 76;
+        if (moveEvent.clientY < edge) window.scrollBy({ top: -16, behavior: "auto" });
+        else if (moveEvent.clientY > window.innerHeight - edge) window.scrollBy({ top: 16, behavior: "auto" });
+      };
+
+      const finish = (endEvent) => {
+        if (endEvent.pointerId !== pointerId) return;
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", finish);
+        row.classList.remove("dragging");
+        document.body.classList.remove("event-prep-dragging");
+        try { if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId); } catch (_) {}
+
+        const finalOrder = groupRows().map((item) => item.dataset.eventPrepTaskId || "");
+        if (moved && originalOrder.join("|") !== finalOrder.join("|")) {
+          saveEventPrepOrderFromDom(event, occurrenceStartDate, Number(daysBefore));
+          refreshEventDetailsBody(event, occurrenceStartDate);
+        }
+      };
+
+      window.addEventListener("pointermove", move, { passive: false });
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", finish);
     });
 
-    handle.addEventListener("dragend", () => {
-      pointerMoved = true;
-      finishDrag();
-    });
-
-    handle.addEventListener("pointerdown", (pointerEvent) => {
-      if (pointerEvent.pointerType === "mouse") return;
-      if (draggedRow) finishDrag();
-      pointerEvent.preventDefault();
-      pointerEvent.stopPropagation();
-      pointerId = pointerEvent.pointerId;
-      beginDrag(row);
-      document.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
-      document.addEventListener("pointerup", onPointerFinish, { capture: true, passive: false });
-      document.addEventListener("pointercancel", onPointerFinish, { capture: true, passive: false });
-    });
-  });
-
-  const onPointerMove = (pointerEvent) => {
-    if (!draggedRow || pointerId !== pointerEvent.pointerId) return;
-    pointerEvent.preventDefault();
-    pointerMoved = true;
-    moveDraggedRowByY(pointerEvent.clientY);
-  };
-
-  const onPointerFinish = (pointerEvent) => {
-    if (!draggedRow || pointerId !== pointerEvent.pointerId) return;
-    pointerEvent.preventDefault();
-    finishDrag();
-    document.removeEventListener("pointermove", onPointerMove, true);
-    document.removeEventListener("pointerup", onPointerFinish, true);
-    document.removeEventListener("pointercancel", onPointerFinish, true);
-  };
-
-  list.addEventListener("dragover", (dragEvent) => {
-    if (!draggedRow) return;
-    dragEvent.preventDefault();
-    pointerMoved = true;
-    moveDraggedRowByY(dragEvent.clientY);
+    handle.addEventListener("contextmenu", (contextEvent) => contextEvent.preventDefault());
   });
 }
 function attachEventPrepDialogEvents(event, occurrenceStartDate) {
@@ -3910,6 +3997,7 @@ function attachScreenEvents() {
     editingShoppingId = null;
     render();
   }));
+  setupShoppingDragHandles();
 
   document.querySelector("[data-google-calendar-connect]")?.addEventListener("click", startGoogleCalendarConnect);
   document.querySelector("[data-google-calendar-sync]")?.addEventListener("click", syncGoogleCalendarNow);
@@ -4523,6 +4611,7 @@ function submitShopping(formData, force = false) {
     category: formData.get("category") || SHOPPING_UNCATEGORIZED,
     purchased: false,
     purchasedAt: null,
+    order: nextShoppingOrder(),
   };
   const duplicate = state.shopping.find((existing) => !existing.purchased && normalizeName(existing.name) === normalizeName(item.name));
   if (duplicate && !force) {

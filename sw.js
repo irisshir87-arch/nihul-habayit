@@ -1,4 +1,4 @@
-const CACHE = "nihul-habayit-v15-52-event-prep-drag-fix";
+const CACHE = "nihul-habayit-v15-53-drag-and-shopping-order";
 const ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", event => {
