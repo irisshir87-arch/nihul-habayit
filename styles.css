@@ -3407,3 +3407,47 @@ body.event-prep-dragging .event-prep-list {
   font-weight: 800;
 }
 .event-prep-add-draft { justify-self: start; }
+
+/* V15.54 — תצוגת משימות הכנה קריאה במובייל: שם למעלה, פרטים מתחת */
+@media (max-width: 560px) {
+  .event-prep-task {
+    grid-template-columns: 24px 30px minmax(0, 1fr) 30px;
+    column-gap: 8px;
+    min-height: 56px;
+    padding: 7px 0;
+  }
+
+  .event-prep-task-copy {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+    gap: 2px;
+    overflow: visible;
+    white-space: normal;
+  }
+
+  .event-prep-task-copy strong {
+    display: -webkit-box;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .event-prep-task-copy span {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+}
