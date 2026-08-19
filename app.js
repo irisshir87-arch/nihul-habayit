@@ -248,6 +248,20 @@ const APP_RELEASES = Object.freeze([
       { icon: "↕️", text: "אפשר לגרור משימות הכנה באותו מועד כדי לקבוע את סדר העדיפות ביניהן." },
     ],
   },
+  {
+    version: "15.51",
+    updates: [
+      { icon: "🛒", text: "בהוספת מוצר אפשר לבחור ללא קטגוריה, וזו ברירת המחדל למוצר חדש." },
+      { icon: "👤", text: "בסידור או תכנון חדש ברירת המחדל היא המשתמש המחובר." },
+    ],
+  },
+  {
+    version: "15.52",
+    updates: [
+      { icon: "↕️", text: "תוקנה הגרירה הידנית של משימות ההכנה באירוע, כולל במובייל." },
+      { icon: "💾", text: "סדר העדיפות שנקבע בגרירה נשמר גם לאחר סגירה ופתיחה מחדש של האירוע." },
+    ],
+  },
 ]);
 const APP_RELEASE = Object.freeze({
   ...APP_RELEASES[APP_RELEASES.length - 1],
@@ -283,6 +297,7 @@ function configureHouseholdMembers(members) {
 }
 
 configureHouseholdMembers(DEFAULT_HOUSEHOLD_MEMBERS);
+const SHOPPING_UNCATEGORIZED = "ללא קטגוריה";
 const SHOPPING_DEFAULT_CATEGORIES = [
   "בשר", "מאפים", "מוצרי חלב", "מזווה", "מתוקים", "נקניק",
   "ניקיון", "פארם", "פירות וירקות", "קפואים", "שתייה", "אחר"
@@ -2455,8 +2470,10 @@ function shoppingCategories() {
 }
 
 function shoppingCategoryOptions(selected = "") {
-  return [...new Set([...shoppingCategories(), selected].filter(Boolean))]
-    .sort((a, b) => collator.compare(a, b))
+  const categories = [...new Set([...shoppingCategories(), selected].filter(Boolean))]
+    .filter((category) => category !== SHOPPING_UNCATEGORIZED)
+    .sort((a, b) => collator.compare(a, b));
+  return [SHOPPING_UNCATEGORIZED, ...categories]
     .map((category) => `<option value="${escapeHtml(category)}" ${category === selected ? "selected" : ""}>${escapeHtml(category)}</option>`).join("");
 }
 
@@ -2503,7 +2520,7 @@ function shoppingGroupsHtml(items, purchased) {
 function shoppingRowHtml(item, showCategory = false) {
   return `<div class="shopping-row" data-shopping-row data-shopping-id="${item.id}" data-name="${escapeHtml(normalizeName(item.name))}" data-category="${escapeHtml(item.category || "אחר")}">
     <button class="checkbox ${item.purchased ? "checked" : ""}" data-shopping-toggle="${item.id}" aria-label="${item.purchased ? "החזרה לרשימת הקניות" : "סימון כנרכש"}">${item.purchased ? "✓" : ""}</button>
-    <div class="shopping-product"><strong class="${item.purchased ? "strike" : ""}">${escapeHtml(item.name)}</strong>${showCategory && shoppingCategoryFilter === "הכל" ? `<small>${shoppingCategoryIcon(item.category || "אחר")} ${escapeHtml(item.category || "אחר")}</small>` : ""}</div>
+    <div class="shopping-product"><strong class="${item.purchased ? "strike" : ""}">${escapeHtml(item.name)}</strong>${showCategory && shoppingCategoryFilter === "הכל" && (item.category || "אחר") !== SHOPPING_UNCATEGORIZED ? `<small>${shoppingCategoryIcon(item.category || "אחר")} ${escapeHtml(item.category || "אחר")}</small>` : ""}</div>
     <div class="quantity-stepper always-visible" aria-label="כמות ${positiveInteger(item.quantity)}">
       <button type="button" class="stepper-button" data-shopping-quantity="${item.id}" data-delta="-1" aria-label="הפחתת כמות">−</button>
       <strong>${positiveInteger(item.quantity)}</strong>
@@ -2561,7 +2578,7 @@ function saveInlineShoppingEdit(id) {
   const duplicate = state.shopping.find((existing) => existing.id !== id && !existing.purchased && !item.purchased && normalizeName(existing.name) === normalizeName(name));
   if (duplicate && !confirm("המוצר כבר נמצא ברשימת הקניות. לשמור את הכפילות בכל זאת?")) return;
   item.name = name;
-  item.category = row.querySelector("[data-inline-category]")?.value || "אחר";
+  item.category = row.querySelector("[data-inline-category]")?.value || SHOPPING_UNCATEGORIZED;
   item.quantity = positiveInteger(row.querySelector("[data-inline-quantity]")?.value);
   editingShoppingId = null;
   saveState("המוצר עודכן");
@@ -3337,17 +3354,57 @@ function saveEventPrepOrderFromDom(event, occurrenceStartDate, daysBefore) {
 function attachEventPrepDragEvents(event, occurrenceStartDate) {
   const list = dialogBody.querySelector(".event-prep-list");
   if (!list) return;
+
   let draggedRow = null;
   let draggedDays = null;
   let pointerId = null;
   let pointerMoved = false;
+  let originalOrder = [];
 
-  const moveRowNearTarget = (clientY, targetRow) => {
-    if (!draggedRow || !targetRow || targetRow === draggedRow) return;
-    if (targetRow.dataset.eventPrepDays !== String(draggedDays)) return;
-    const rect = targetRow.getBoundingClientRect();
-    if (clientY < rect.top + rect.height / 2) targetRow.before(draggedRow);
-    else targetRow.after(draggedRow);
+  const sameTimeRows = () => [...list.querySelectorAll(`[data-event-prep-task-id][data-event-prep-days="${String(draggedDays)}"]`)];
+
+  const orderIds = () => sameTimeRows().map((row) => row.dataset.eventPrepTaskId || "");
+
+  const moveDraggedRowByY = (clientY) => {
+    if (!draggedRow) return;
+    const candidates = sameTimeRows().filter((row) => row !== draggedRow);
+    if (!candidates.length) return;
+
+    const beforeRow = candidates.find((row) => {
+      const rect = row.getBoundingClientRect();
+      return clientY < rect.top + rect.height / 2;
+    });
+
+    if (beforeRow) {
+      if (draggedRow.nextElementSibling !== beforeRow) list.insertBefore(draggedRow, beforeRow);
+      return;
+    }
+
+    const lastRow = candidates[candidates.length - 1];
+    if (lastRow.nextElementSibling !== draggedRow) lastRow.after(draggedRow);
+  };
+
+  const beginDrag = (row) => {
+    draggedRow = row;
+    draggedDays = row.dataset.eventPrepDays;
+    pointerMoved = false;
+    originalOrder = orderIds();
+    row.classList.add("dragging");
+    document.body.classList.add("event-prep-dragging");
+  };
+
+  const finishDrag = () => {
+    if (!draggedRow) return;
+    const changed = pointerMoved && originalOrder.join("|") !== orderIds().join("|");
+    draggedRow.classList.remove("dragging");
+    document.body.classList.remove("event-prep-dragging");
+    if (changed) saveEventPrepOrderFromDom(event, occurrenceStartDate, draggedDays);
+    draggedRow = null;
+    draggedDays = null;
+    pointerId = null;
+    pointerMoved = false;
+    originalOrder = [];
+    if (changed) refreshEventDetailsBody(event, occurrenceStartDate);
   };
 
   list.querySelectorAll("[data-event-prep-drag]").forEach((handle) => {
@@ -3355,64 +3412,52 @@ function attachEventPrepDragEvents(event, occurrenceStartDate) {
     if (!row) return;
 
     handle.addEventListener("dragstart", (dragEvent) => {
-      draggedRow = row;
-      draggedDays = row.dataset.eventPrepDays;
-      row.classList.add("dragging");
+      beginDrag(row);
       dragEvent.dataTransfer.effectAllowed = "move";
       try { dragEvent.dataTransfer.setData("text/plain", row.dataset.eventPrepTaskId || ""); } catch (_) {}
     });
+
     handle.addEventListener("dragend", () => {
-      if (!draggedRow) return;
-      draggedRow.classList.remove("dragging");
-      saveEventPrepOrderFromDom(event, occurrenceStartDate, draggedDays);
-      draggedRow = null;
-      draggedDays = null;
-      refreshEventDetailsBody(event, occurrenceStartDate);
+      pointerMoved = true;
+      finishDrag();
     });
 
     handle.addEventListener("pointerdown", (pointerEvent) => {
       if (pointerEvent.pointerType === "mouse") return;
+      if (draggedRow) finishDrag();
       pointerEvent.preventDefault();
-      draggedRow = row;
-      draggedDays = row.dataset.eventPrepDays;
+      pointerEvent.stopPropagation();
       pointerId = pointerEvent.pointerId;
-      pointerMoved = false;
-      row.classList.add("dragging");
-      handle.setPointerCapture?.(pointerId);
+      beginDrag(row);
+      document.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
+      document.addEventListener("pointerup", onPointerFinish, { capture: true, passive: false });
+      document.addEventListener("pointercancel", onPointerFinish, { capture: true, passive: false });
     });
-    handle.addEventListener("pointermove", (pointerEvent) => {
-      if (pointerId !== pointerEvent.pointerId || !draggedRow) return;
-      pointerEvent.preventDefault();
-      pointerMoved = true;
-      const underPointer = document.elementFromPoint(pointerEvent.clientX, pointerEvent.clientY);
-      const targetRow = underPointer?.closest?.("[data-event-prep-task-id]");
-      moveRowNearTarget(pointerEvent.clientY, targetRow);
-    });
-    const finishPointerDrag = (pointerEvent) => {
-      if (pointerId !== pointerEvent.pointerId || !draggedRow) return;
-      pointerEvent.preventDefault();
-      handle.releasePointerCapture?.(pointerId);
-      draggedRow.classList.remove("dragging");
-      if (pointerMoved) saveEventPrepOrderFromDom(event, occurrenceStartDate, draggedDays);
-      draggedRow = null;
-      draggedDays = null;
-      pointerId = null;
-      pointerMoved = false;
-      refreshEventDetailsBody(event, occurrenceStartDate);
-    };
-    handle.addEventListener("pointerup", finishPointerDrag);
-    handle.addEventListener("pointercancel", finishPointerDrag);
   });
+
+  const onPointerMove = (pointerEvent) => {
+    if (!draggedRow || pointerId !== pointerEvent.pointerId) return;
+    pointerEvent.preventDefault();
+    pointerMoved = true;
+    moveDraggedRowByY(pointerEvent.clientY);
+  };
+
+  const onPointerFinish = (pointerEvent) => {
+    if (!draggedRow || pointerId !== pointerEvent.pointerId) return;
+    pointerEvent.preventDefault();
+    finishDrag();
+    document.removeEventListener("pointermove", onPointerMove, true);
+    document.removeEventListener("pointerup", onPointerFinish, true);
+    document.removeEventListener("pointercancel", onPointerFinish, true);
+  };
 
   list.addEventListener("dragover", (dragEvent) => {
     if (!draggedRow) return;
-    const targetRow = dragEvent.target.closest?.("[data-event-prep-task-id]");
-    if (!targetRow || targetRow.dataset.eventPrepDays !== String(draggedDays)) return;
     dragEvent.preventDefault();
-    moveRowNearTarget(dragEvent.clientY, targetRow);
+    pointerMoved = true;
+    moveDraggedRowByY(dragEvent.clientY);
   });
 }
-
 function attachEventPrepDialogEvents(event, occurrenceStartDate) {
   attachEventPrepDragEvents(event, occurrenceStartDate);
   dialogBody.querySelector("[data-add-event-prep]")?.addEventListener("click", () => showEventPrepEditor(event, occurrenceStartDate));
@@ -4464,7 +4509,7 @@ function dialogConfig(type, item) {
 function shoppingFormHtml(item = null) {
   return `<div class="form-stack">
     <label>שם המוצר<input name="name" required autofocus value="${escapeHtml(item?.name || "")}" /></label>
-    <div class="form-grid"><label>כמות<input name="quantity" type="number" min="1" step="1" inputmode="numeric" value="${positiveInteger(item?.quantity)}" required /></label><label>קטגוריה<select name="category">${shoppingCategoryOptions(item?.category || "פירות וירקות")}</select></label></div>
+    <div class="form-grid"><label>כמות<input name="quantity" type="number" min="1" step="1" inputmode="numeric" value="${positiveInteger(item?.quantity)}" required /></label><label>קטגוריה<select name="category">${shoppingCategoryOptions(item?.category || SHOPPING_UNCATEGORIZED)}</select></label></div>
     ${item ? `<label class="checkbox-label"><input name="purchased" type="checkbox" ${item.purchased ? "checked" : ""} /> המוצר נרכש</label>` : ""}
     <div id="duplicate-container"></div>
   </div>`;
@@ -4475,7 +4520,7 @@ function submitShopping(formData, force = false) {
     id: crypto.randomUUID(),
     name: String(formData.get("name") || "").trim(),
     quantity: positiveInteger(formData.get("quantity")),
-    category: formData.get("category") || "אחר",
+    category: formData.get("category") || SHOPPING_UNCATEGORIZED,
     purchased: false,
     purchasedAt: null,
   };
@@ -4506,7 +4551,7 @@ function submitShoppingEdit(id, formData) {
   Object.assign(item, {
     name,
     quantity: positiveInteger(formData.get("quantity")),
-    category: formData.get("category") || "אחר",
+    category: formData.get("category") || SHOPPING_UNCATEGORIZED,
     purchased,
   });
   if (!wasPurchased && purchased) {
@@ -4715,11 +4760,18 @@ async function submitEvent(formData, id = null) {
   }
 }
 
+function defaultCurrentMemberName() {
+  return HOUSEHOLD_MEMBERS.includes(currentMemberName) ? currentMemberName : HOUSEHOLD_MEMBERS[0];
+}
+
 function taskFormHtml(item = null) {
+  const selectedAssignee = item?.assignee && TASK_ASSIGNEES.includes(item.assignee)
+    ? item.assignee
+    : defaultCurrentMemberName();
   return `<div class="form-stack">
     <label>שם הסידור<input name="title" required ${item ? "" : "autofocus"} value="${escapeHtml(item?.title || "")}" /></label>
     <label>תיאור<textarea name="notes">${escapeHtml(item?.notes || "")}</textarea></label>
-    <div class="form-grid"><label>שיוך<select name="assignee">${TASK_ASSIGNEES.map((assignee) => `<option value="${escapeHtml(assignee)}" ${item?.assignee === assignee ? "selected" : ""}>${escapeHtml(TASK_ASSIGNEE_LABELS[assignee] || assignee)}</option>`).join("")}</select></label><label>קטגוריה<select name="category">${taskCategoryOptions(item?.category || "אחר")}</select></label></div>
+    <div class="form-grid"><label>שיוך<select name="assignee">${TASK_ASSIGNEES.map((assignee) => `<option value="${escapeHtml(assignee)}" ${selectedAssignee === assignee ? "selected" : ""}>${escapeHtml(TASK_ASSIGNEE_LABELS[assignee] || assignee)}</option>`).join("")}</select></label><label>קטגוריה<select name="category">${taskCategoryOptions(item?.category || "אחר")}</select></label></div>
     ${notificationChoiceHtml({ checked: !item, text: item ? "שליחת התראה על העדכון" : "שליחת התראה על הסידור החדש" })}
   </div>`;
 }
@@ -4782,9 +4834,10 @@ function isValidWebLink(value) {
 }
 
 function wishFormHtml(item = null) {
+  const selectedCategory = item?.category || (wishCategories().includes(defaultCurrentMemberName()) ? defaultCurrentMemberName() : "בית");
   return `<div class="form-stack">
     <label>שם התכנון<input name="title" required autofocus value="${escapeHtml(item?.title || "")}" /></label>
-    <label>קטגוריה<select name="category">${wishCategoryOptions(item?.category || (wishCategoryFilter === "הכל" ? "בית" : wishCategoryFilter))}</select></label>
+    <label>קטגוריה<select name="category">${wishCategoryOptions(selectedCategory)}</select></label>
     <label>קישורים אופציונליים<textarea name="references" placeholder="קישור אחד בכל שורה (לא חובה)">${escapeHtml(referencesToText(item?.references || []))}</textarea></label>
     <label>הערה אופציונלית<textarea name="note">${escapeHtml(item?.note || "")}</textarea></label>
     ${notificationChoiceHtml({ checked: false, text: item ? "שליחת התראה על העדכון" : "שליחת התראה על התכנון החדש" })}

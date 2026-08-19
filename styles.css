@@ -3231,6 +3231,17 @@ body.wish-category-dragging {
   background: #f2f6ff;
   box-shadow: 0 4px 14px rgba(42, 67, 110, .12);
 }
+body.event-prep-dragging {
+  user-select: none;
+  -webkit-user-select: none;
+  overscroll-behavior: contain;
+}
+body.event-prep-dragging .event-prep-list {
+  touch-action: none;
+}
+.event-prep-task.dragging .event-prep-drag-handle {
+  color: #5d6f88;
+}
 .event-prep-drag-hint {
   margin-top: -4px;
   color: var(--muted);
@@ -3307,7 +3318,8 @@ body.wish-category-dragging {
   .event-prep-editor-grid { grid-template-columns: 1fr; }
   .event-prep-heading { align-items: flex-start; }
   .event-prep-task-copy { gap: 5px; }
-  .event-prep-task { grid-template-columns: 18px 26px minmax(0, 1fr) 34px; }
+  .event-prep-task { grid-template-columns: 24px 26px minmax(0, 1fr) 34px; }
+  .event-prep-drag-handle { width: 24px; min-width: 24px; height: 36px; }
   .event-prep-task-menu { display: block; min-width: 30px; visibility: visible; opacity: 1; }
   .event-prep-menu-button { display: grid; visibility: visible; opacity: 1; }
 }
